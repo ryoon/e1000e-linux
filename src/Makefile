@@ -1,7 +1,7 @@
 ################################################################################
 #
 # Intel PRO/1000 Linux driver
-# Copyright(c) 1999 - 2011 Intel Corporation.
+# Copyright(c) 1999 - 2012 Intel Corporation.
 #
 # This program is free software; you can redistribute it and/or modify it
 # under the terms and conditions of the GNU General Public License,
@@ -183,7 +183,11 @@ ifneq (1,$(shell [ $(KVER_CODE) -ge 132096 ] && echo 1 || echo 0))
 endif
 
 # set the install path
+ifneq (1,$(shell [ $(KVER_CODE) -lt 197120 ] && echo 1 || echo 0))
 INSTDIR := /lib/modules/$(KVER)/kernel/drivers/net/$(DRIVER_NAME)
+else
+INSTDIR := /lib/modules/$(KVER)/kernel/drivers/net/ethernet/intel/$(DRIVER_NAME)
+endif
 
 # look for SMP in config.h
 SMP := $(shell $(CC) $(EXTRA_CFLAGS) -E -dM $(CONFIG_FILE) | \

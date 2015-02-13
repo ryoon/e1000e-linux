@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   Intel PRO/1000 Linux driver
-  Copyright(c) 1999 - 2011 Intel Corporation.
+  Copyright(c) 1999 - 2012 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms and conditions of the GNU General Public License,
@@ -35,6 +35,7 @@
 #include <linux/pci.h>
 #include <linux/slab.h>
 #include <linux/delay.h>
+#include <linux/vmalloc.h>
 
 #include "e1000.h"
 #ifndef HAVE_NETDEV_VLAN_FEATURES
@@ -298,7 +299,7 @@ static int e1000_set_settings(struct net_device *netdev,
 	 * When SoL/IDER sessions are active, autoneg/speed/duplex
 	 * cannot be changed
 	 */
-	if (e1000_check_reset_block(hw)) {
+	if (hw->phy.ops.check_reset_block(hw)) {
 		e_err("Cannot change link characteristics when SoL/IDER is "
 		      "active.\n");
 		return -EINVAL;
@@ -700,7 +701,7 @@ static int e1000_set_eeprom(struct net_device *netdev,
 		ret_val = e1000_read_nvm(hw, first_word, 1, &eeprom_buff[0]);
 		ptr++;
 	}
-	if (((eeprom->offset + eeprom->len) & 1) && (ret_val == 0))
+	if (((eeprom->offset + eeprom->len) & 1) && (!ret_val))
 		/* need read/modify/write of last changed EEPROM word */
 		/* only the first byte of the word is being modified */
 		ret_val = e1000_read_nvm(hw, last_word, 1,
@@ -716,7 +717,7 @@ static int e1000_set_eeprom(struct net_device *netdev,
 	memcpy(ptr, bytes, eeprom->len);
 
 	for (i = 0; i < last_word - first_word + 1; i++)
-		eeprom_buff[i] = cpu_to_le16(eeprom_buff[i]);
+		cpu_to_le16s(&eeprom_buff[i]);
 
 	ret_val = e1000_write_nvm(hw, first_word,
 				  last_word - first_word + 1, eeprom_buff);
@@ -751,7 +752,8 @@ static void e1000_get_drvinfo(struct net_device *netdev,
 	 * EEPROM image version # is reported as firmware version # for
 	 * PCI-E controllers
 	 */
-	snprintf(drvinfo->fw_version, sizeof(drvinfo->fw_version), "%d.%d-%d",
+	snprintf(drvinfo->fw_version, sizeof(drvinfo->fw_version),
+		 "%d.%d-%d",
 		 (adapter->eeprom_vers & 0xF000) >> 12,
 		 (adapter->eeprom_vers & 0x0FF0) >> 4,
 		 (adapter->eeprom_vers & 0x000F));
@@ -785,12 +787,12 @@ static int e1000_set_ringparam(struct net_device *netdev,
 	if ((ring->rx_mini_pending) || (ring->rx_jumbo_pending))
 		return -EINVAL;
 
-	new_rx_count = max_t(u32, ring->rx_pending, (u32)E1000_MIN_RXD);
-	new_rx_count = min_t(u32, new_rx_count, (u32)(E1000_MAX_RXD));
+	new_rx_count = clamp_t(u32, ring->rx_pending, E1000_MIN_RXD,
+			       E1000_MAX_RXD);
 	new_rx_count = ALIGN(new_rx_count, REQ_RX_DESCRIPTOR_MULTIPLE);
 
-	new_tx_count = max_t(u32, ring->tx_pending, (u32)E1000_MIN_TXD);
-	new_tx_count = min_t(u32, new_tx_count, (u32)(E1000_MAX_TXD));
+	new_tx_count = clamp_t(u32, ring->tx_pending, E1000_MIN_TXD,
+			       E1000_MAX_TXD);
 	new_tx_count = ALIGN(new_tx_count, REQ_TX_DESCRIPTOR_MULTIPLE);
 
 	if ((new_tx_count == adapter->tx_ring_count) &&
@@ -1249,7 +1251,7 @@ static int e1000_setup_desc_rings(struct e1000_adapter *adapter)
 
 	tx_ring->buffer_info = kcalloc(tx_ring->count,
 				       sizeof(struct e1000_buffer), GFP_KERNEL);
-	if (!(tx_ring->buffer_info)) {
+	if (!tx_ring->buffer_info) {
 		ret_val = 1;
 		goto err_nomem;
 	}
@@ -1310,7 +1312,7 @@ static int e1000_setup_desc_rings(struct e1000_adapter *adapter)
 
 	rx_ring->buffer_info = kcalloc(rx_ring->count,
 				       sizeof(struct e1000_buffer), GFP_KERNEL);
-	if (!(rx_ring->buffer_info)) {
+	if (!rx_ring->buffer_info) {
 		ret_val = 5;
 		goto err_nomem;
 	}
@@ -1758,11 +1760,13 @@ static int e1000_run_loopback_test(struct e1000_adapter *adapter)
 
 static int e1000_loopback_test(struct e1000_adapter *adapter, u64 *data)
 {
+	struct e1000_hw *hw = &adapter->hw;
+
 	/*
 	 * PHY loopback cannot be performed if SoL/IDER
 	 * sessions are active
 	 */
-	if (e1000_check_reset_block(&adapter->hw)) {
+	if (hw->phy.ops.check_reset_block(hw)) {
 		e_err("Cannot do PHY loopback test when SoL/IDER is active.\n");
 		*data = 0;
 		goto out;
@@ -2029,11 +2033,11 @@ static int e1000_set_phys_id(struct net_device *netdev,
 		break;
 
 	case ETHTOOL_ID_ON:
-		adapter->hw.mac.ops.led_on(&adapter->hw);
+		hw->mac.ops.led_on(hw);
 		break;
 
 	case ETHTOOL_ID_OFF:
-		adapter->hw.mac.ops.led_off(&adapter->hw);
+		hw->mac.ops.led_off(hw);
 		break;
 	}
 	return 0;
@@ -2218,6 +2222,62 @@ static void e1000_get_strings(struct net_device *netdev, u32 stringset,
 	}
 }
 
+#ifdef ETHTOOL_GRXRINGS
+#ifdef HAVE_ETHTOOL_GET_RXNFC_VOID_RULE_LOCS
+static int e1000_get_rxnfc(struct net_device *netdev,
+			   struct ethtool_rxnfc *info, void *rule_locs)
+#else
+static int e1000_get_rxnfc(struct net_device *netdev,
+			   struct ethtool_rxnfc *info, u32 *rule_locs)
+#endif
+{
+	info->data = 0;
+
+	switch (info->cmd) {
+/* *INDENT-OFF* */
+	case ETHTOOL_GRXFH: {
+		struct e1000_adapter *adapter = netdev_priv(netdev);
+		struct e1000_hw *hw = &adapter->hw;
+		u32 mrqc = er32(MRQC);
+
+		if (!(mrqc & E1000_MRQC_RSS_FIELD_MASK))
+			return 0;
+
+		switch (info->flow_type) {
+		case TCP_V4_FLOW:
+			if (mrqc & E1000_MRQC_RSS_FIELD_IPV4_TCP)
+				info->data |= RXH_L4_B_0_1 | RXH_L4_B_2_3;
+			/* fall through */
+		case UDP_V4_FLOW:
+		case SCTP_V4_FLOW:
+		case AH_ESP_V4_FLOW:
+		case IPV4_FLOW:
+			if (mrqc & E1000_MRQC_RSS_FIELD_IPV4)
+				info->data |= RXH_IP_SRC | RXH_IP_DST;
+			break;
+		case TCP_V6_FLOW:
+			if (mrqc & E1000_MRQC_RSS_FIELD_IPV6_TCP)
+				info->data |= RXH_L4_B_0_1 | RXH_L4_B_2_3;
+			/* fall through */
+		case UDP_V6_FLOW:
+		case SCTP_V6_FLOW:
+		case AH_ESP_V6_FLOW:
+		case IPV6_FLOW:
+			if (mrqc & E1000_MRQC_RSS_FIELD_IPV6)
+				info->data |= RXH_IP_SRC | RXH_IP_DST;
+			break;
+		default:
+			break;
+		}
+		return 0;
+	}
+/* *INDENT-ON* */
+	default:
+		return -EOPNOTSUPP;
+	}
+}
+#endif /* ETHTOOL_GRXRINGS */
+
 static const struct ethtool_ops e1000_ethtool_ops = {
 	.get_settings = e1000_get_settings,
 	.set_settings = e1000_set_settings,
@@ -2274,6 +2334,9 @@ static const struct ethtool_ops e1000_ethtool_ops = {
 #endif
 	.get_coalesce = e1000_get_coalesce,
 	.set_coalesce = e1000_set_coalesce,
+#ifdef ETHTOOL_GRXRINGS
+	.get_rxnfc = e1000_get_rxnfc,
+#endif
 };
 
 void e1000e_set_ethtool_ops(struct net_device *netdev)
