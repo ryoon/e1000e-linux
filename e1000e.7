@@ -90,7 +90,7 @@ This limits the delay in which a transmit interrupt is generated (in units of 1.
 256
 .IP
 .B Usage: 
-insmod e1000e.ko copybreak=128
+modprobe e1000e.ko copybreak=128
 .IP
 Driver copies all packets below or equaling this size to a fresh rx buffer before handing it up the stack.
 .IP
@@ -161,7 +161,7 @@ This option allows for the ability of IEEE802.3az (a.k.a. Energy Efficient Ether
 .IP
 0 - n: where n is the number of the NUMA node that should be used to allocate memory for this adapter port.
 .IP
--1: uses the driver default of allocating memory on whichever processor is running insmod/modprobe. 
+-1: uses the driver default of allocating memory on whichever processor is running modprobe. 
 .IP
 The Node parameter will allow you to pick which NUMA node you want to have 
 the adapter allocate memory from.  All driver structures, in-memory queues, and receive buffers will be allocated on the node specified.  This parameter is onlyuseful when interrupt affinity is specified, otherwise some portion of the time the interrupt could run on a different core than the memory is allocated on, causing slower memory access and impacting throughput, CPU, or both.
