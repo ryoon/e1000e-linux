@@ -35,6 +35,9 @@ s32  e1000e_acquire_nvm(struct e1000_hw *hw);
 s32  e1000e_poll_eerd_eewr_done(struct e1000_hw *hw, int ee_reg);
 s32  e1000_read_mac_addr_generic(struct e1000_hw *hw);
 s32  e1000e_read_pba_num(struct e1000_hw *hw, u32 *pba_num);
+s32  e1000_read_pba_string_generic(struct e1000_hw *hw, u8 *pba_num,
+                                   u32 pba_num_size);
+s32  e1000_read_pba_length_generic(struct e1000_hw *hw, u32 *pba_num_size);
 s32  e1000e_read_nvm_eerd(struct e1000_hw *hw, u16 offset, u16 words,
                          u16 *data);
 s32  e1000e_valid_led_default(struct e1000_hw *hw, u16 *data);

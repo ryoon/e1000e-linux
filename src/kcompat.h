@@ -211,7 +211,15 @@ struct msix_entry {
 #endif
 
 #ifndef NETIF_F_LRO
-#define NETIF_F_LRO 0
+#define NETIF_F_LRO (1 << 15)
+#endif
+
+#ifndef ETH_FLAG_LRO
+#define ETH_FLAG_LRO (1 << 15)
+#endif
+
+#ifndef ETH_FLAG_NTUPLE
+#define ETH_FLAG_NTUPLE 0
 #endif
 
 #ifndef IPPROTO_SCTP
@@ -290,6 +298,10 @@ enum {
 	.subvendor = PCI_ANY_ID, .subdevice = PCI_ANY_ID
 #endif
 
+#ifndef node_online
+#define node_online(node) ((node) == 0)
+#endif
+
 #ifndef num_online_cpus
 #define num_online_cpus() smp_num_cpus
 #endif
@@ -356,6 +368,11 @@ extern struct sk_buff *_kc_netdev_alloc_skb_ip_align(struct net_device *dev,
 #define NET_SKB_PAD L1_CACHE_BYTES
 #define netdev_alloc_skb_ip_align(n, l) _kc_netdev_alloc_skb_ip_align(n, l)
 #endif /* CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS */
+
+/* taken from 2.6.24 definition in linux/kernel.h */
+#ifndef IS_ALIGNED
+#define IS_ALIGNED(x,a)         (((x) % ((typeof(x))(a))) == 0)
+#endif
 
 /*****************************************************************************/
 /* Installations with ethtool version without eeprom, adapter id, or statistics
@@ -1226,10 +1243,6 @@ extern void _kc_skb_fill_page_desc(struct sk_buff *skb, int i, struct page *page
 #define page_count(p) atomic_read(&(p)->count)
 #endif
 
-#ifndef node_online
-#define node_online(node) ((node) == 0)
-#endif
-
 #ifdef MAX_NUMNODES
 #undef MAX_NUMNODES
 #endif
@@ -1504,10 +1517,6 @@ static inline unsigned long _kc_usecs_to_jiffies(const unsigned int m)
 extern void *_kc_kzalloc(size_t size, int flags);
 #endif
 
-#ifndef vmalloc_node
-#define vmalloc_node(a,b) vmalloc(a)
-#endif /* vmalloc_node*/
-
 /* Generic MII registers. */
 #define MII_ESTATUS	    0x0f	/* Extended Status */
 /* Basic mode status register. */
@@ -1519,6 +1528,10 @@ extern void *_kc_kzalloc(size_t size, int flags);
 
 /*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,15) )
+#ifndef vmalloc_node
+#define vmalloc_node(a,b) vmalloc(a)
+#endif /* vmalloc_node*/
+
 #define setup_timer(_timer, _function, _data) \
 do { \
 	(_timer)->function = _function; \
@@ -2118,6 +2131,9 @@ extern u16 _kc_skb_tx_hash(struct net_device *dev, struct sk_buff *skb);
 #ifndef pm_runtime_enable
 #define pm_runtime_enable(dev)	do {} while (0)
 #endif
+#ifndef pm_runtime_get_noresume
+#define pm_runtime_get_noresume(dev)	do {} while (0)
+#endif
 #else /* < 2.6.32 */
 #if defined(CONFIG_FCOE) || defined(CONFIG_FCOE_MODULE)
 #ifndef HAVE_NETDEV_OPS_FCOE_ENABLE
@@ -2207,7 +2223,7 @@ do {								\
 	struct adapter_struct *kc_adapter = netdev_priv(netdev);\
 	struct pci_dev *pdev = kc_adapter->pdev;		\
 	struct device *dev = pci_dev_to_dev(pdev);		\
-	dev_printk(level, dev->parent, "%s: " format,		\
+	dev_printk(level, dev, "%s: " format,			\
 		   netdev_name(netdev), ##args);		\
 } while(0)
 #else /* 2.6.21 => 2.6.34 */
@@ -2275,4 +2291,12 @@ do {								\
 #else /* < 2.6.35 */
 #define HAVE_PM_QOS_REQUEST_LIST
 #endif /* < 2.6.35 */
+
+/*****************************************************************************/
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,36) )
+extern int _kc_ethtool_op_set_flags(struct net_device *, u32, u32);
+#define ethtool_op_set_flags _kc_ethtool_op_set_flags
+#else /* < 2.6.36 */
+#define HAVE_PM_QOS_REQUEST_ACTIVE
+#endif /* < 2.6.36 */
 #endif /* _KCOMPAT_H_ */

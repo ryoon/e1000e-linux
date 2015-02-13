@@ -73,6 +73,11 @@
 #define E1000_SHRAH_MAV  0x40000000 /* Multicast Addr Valid bit */
 
 #define E1000_H2ME             0x05B50    /* Host to ME */
+#define E1000_H2ME_LSECREQ     0x00000001 /* Linksec Request */
+#define E1000_H2ME_LSECA       0x00000002 /* Linksec Active */
+#define E1000_H2ME_LSECSF      0x00000004 /* Linksec Failed */
+#define E1000_H2ME_LSECD       0x00000008 /* Linksec Disabled */
+#define E1000_H2ME_SLCAPD      0x00000010 /* Start LCAPD */
 #define E1000_H2ME_IPV4_ARP_EN 0x00000020 /* Arp Offload enable bit */
 #define E1000_H2ME_IPV6_NS_EN  0x00000040 /* NS Offload enable bit */
 
@@ -91,9 +96,14 @@
 #define E1000_FEXTNVM_SW_CONFIG        1
 #define E1000_FEXTNVM_SW_CONFIG_ICH8M (1 << 27) /* Bit redefined for ICH8M */
 
+#define E1000_FEXTNVM4_BEACON_DURATION_MASK    0x7
+#define E1000_FEXTNVM4_BEACON_DURATION_8USEC   0x7
+#define E1000_FEXTNVM4_BEACON_DURATION_16USEC  0x3
+
 #define PCIE_ICH8_SNOOP_ALL   PCIE_NO_SNOOP_ALL
 
 #define E1000_ICH_RAR_ENTRIES            7
+#define E1000_PCH2_RAR_ENTRIES           5 /* RAR[0], SHRA[0-3] */
 
 #define PHY_PAGE_SHIFT 5
 #define PHY_REG(page, reg) (((page) << PHY_PAGE_SHIFT) | \
@@ -161,6 +171,7 @@
 
 /* SMBus Address Phy Register */
 #define HV_SMB_ADDR            PHY_REG(768, 26)
+#define HV_SMB_ADDR_MASK       0x007F
 #define HV_SMB_ADDR_PEC_EN     0x0200
 #define HV_SMB_ADDR_VALID      0x0080
 

@@ -976,3 +976,7 @@ struct sk_buff *_kc_netdev_alloc_skb_ip_align(struct net_device *dev,
 	return skb;
 }
 #endif /* < 2.6.33 || defined(CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS) */
+
+/*****************************************************************************/
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,36) )
+#endif /* < 2.6.36 */

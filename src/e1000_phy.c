@@ -188,6 +188,13 @@ s32 e1000e_read_phy_reg_mdic(struct e1000_hw *hw, u32 offset, u16 *data)
 		goto out;
 	}
 	*data = (u16) mdic;
+	
+	/*
+	 * Allow some time after each MDIC transaction to avoid 
+	 * reading duplicate data in the next MDIC transaction.
+	 */
+	if (hw->mac.type == e1000_pch2lan)
+		udelay(100);
 
 out:
 	return ret_val;
@@ -245,6 +252,13 @@ s32 e1000e_write_phy_reg_mdic(struct e1000_hw *hw, u32 offset, u16 data)
 		ret_val = -E1000_ERR_PHY;
 		goto out;
 	}
+
+	/*
+	 * Allow some time after each MDIC transaction to avoid 
+	 * reading duplicate data in the next MDIC transaction.
+	 */
+	if (hw->mac.type == e1000_pch2lan)
+		udelay(100);
 
 out:
 	return ret_val;

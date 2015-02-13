@@ -36,6 +36,7 @@
                               (ID_LED_DEF1_DEF2))
 
 #define E1000_GCR_L1_ACT_WITHOUT_L0S_RX 0x08000000
+#define AN_RETRY_COUNT          5 /* Autoneg Retry Count value */
 
 /* Intr Throttling - RW */
 #define E1000_EITR_82574(_n)    (0x000E8 + (0x4 * (_n)))

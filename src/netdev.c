@@ -59,7 +59,7 @@
 #define DRV_EXTRAVERSION 
 #endif
 
-#define DRV_VERSION "1.2.10" DRV_EXTRAVERSION
+#define DRV_VERSION "1.2.17" DRV_EXTRAVERSION
 char e1000e_driver_name[] = "e1000e";
 const char e1000e_driver_version[] = DRV_VERSION;
 
@@ -169,6 +169,7 @@ static struct e1000_info e1000_82573_info = {
 				  | FLAG_HAS_SMART_POWER_DOWN
 				  | FLAG_HAS_AMT
 				  | FLAG_HAS_SWSM_ON_LOAD,
+	.flags2			= FLAG2_DISABLE_ASPM_L1,
 	.pba			= 20,
 	.max_hw_frame_size	= ETH_FRAME_LEN + ETH_FCS_LEN,
 	.init_ops		= e1000_init_function_pointers_82571,
@@ -187,8 +188,9 @@ static struct e1000_info e1000_82574_info = {
 				  | FLAG_RX_CSUM_ENABLED
 				  | FLAG_HAS_SMART_POWER_DOWN
 				  | FLAG_HAS_AMT
-				  | FLAG_HAS_CTRLEXT_ON_LOAD
-				  | FLAG2_CHECK_PHY_HANG, /*errata */
+				  | FLAG_HAS_CTRLEXT_ON_LOAD,
+	.flags2			= FLAG2_CHECK_PHY_HANG /* errata */
+				  | FLAG2_DISABLE_ASPM_L1,
 	.pba			= 32,
 	.max_hw_frame_size	= DEFAULT_JUMBO,
 	.init_ops		= e1000_init_function_pointers_82571,
@@ -322,7 +324,7 @@ static struct e1000_info e1000_pch2_info = {
 				  | FLAG_APME_IN_WUC,
 	.flags2			= FLAG2_HAS_PHY_STATS
 				  | FLAG2_HAS_EEE,
-	.pba			= 18,
+	.pba			= 26,
 	.max_hw_frame_size	= DEFAULT_JUMBO,
 	.init_ops		= e1000_init_function_pointers_ich8lan,
 	.get_variants		= e1000_get_variants_ich8lan,
@@ -1095,6 +1097,7 @@ static bool e1000_clean_rx_irq(struct e1000_adapter *adapter)
 			break;
 		(*work_done)++;
 #endif
+		rmb();	/* read descriptor and rx_buffer_info after status DD */
 
 		status = rx_desc->status;
 		skb = buffer_info->skb;
@@ -1310,6 +1313,7 @@ static bool e1000_clean_tx_irq(struct e1000_adapter *adapter)
 	eop_desc = E1000_TX_DESC(*tx_ring, eop);
 
 	while (eop_desc->upper.data & cpu_to_le32(E1000_TXD_STAT_DD)) {
+		rmb(); /* read buffer_info after eop_desc */
 		for (cleaned = 0; !cleaned; ) {
 			tx_desc = E1000_TX_DESC(*tx_ring, i);
 			buffer_info = &tx_ring->buffer_info[i];
@@ -1426,6 +1430,7 @@ static bool e1000_clean_rx_irq_ps(struct e1000_adapter *adapter)
 		(*work_done)++;
 #endif
 		skb = buffer_info->skb;
+		rmb();	/* read descriptor and rx_buffer_info after status DD */
 
 		/* in the packet split case this is header only */
 		prefetch(skb->data - NET_IP_ALIGN);
@@ -1635,6 +1640,7 @@ static bool e1000_clean_jumbo_rx_irq(struct e1000_adapter *adapter,
 		if (*work_done >= work_to_do)
 			break;
 		(*work_done)++;
+		rmb();	/* read descriptor and rx_buffer_info after status DD */
 
 		status = rx_desc->status;
 		skb = buffer_info->skb;
@@ -2230,29 +2236,29 @@ void e1000e_reset_interrupt_capability(struct e1000_adapter *adapter)
 void e1000e_set_interrupt_capability(struct e1000_adapter *adapter)
 {
 	int err;
-	int numvecs, i;
-
+	int i;
 
 	switch (adapter->int_mode) {
 	case E1000E_INT_MODE_MSIX:
 		if (adapter->flags & FLAG_HAS_MSIX) {
 #ifdef CONFIG_E1000E_SEPARATE_TX_HANDLER
-			numvecs = 3; /* RxQ0, TxQ0 and other */
+			adapter->num_vectors = 3; /* RxQ0, TxQ0 and other */
 #else
-			numvecs = 2; /* RxQ0/TxQ0 and other */
+			adapter->num_vectors = 2; /* RxQ0/TxQ0 and other */
 #endif
-			adapter->msix_entries = kcalloc(numvecs,
-						      sizeof(struct msix_entry),
-						      GFP_KERNEL);
+			adapter->msix_entries = kcalloc(adapter->num_vectors,
+						     sizeof(struct msix_entry),
+						     GFP_KERNEL);
 			if (adapter->msix_entries) {
-				for (i = 0; i < numvecs; i++)
+				for (i = 0; i < adapter->num_vectors; i++)
 					adapter->msix_entries[i].entry = i;
 
 				err = pci_enable_msix(adapter->pdev,
 						      adapter->msix_entries,
-						      numvecs);
-				if (err == 0)
+						      adapter->num_vectors);
+				if (err == 0) {
 					return;
+				}
 			}
 			/* MSI-X failed, so fall through and try MSI */
 			e_err("Failed to initialize MSI-X interrupts.  "
@@ -2274,6 +2280,9 @@ void e1000e_set_interrupt_capability(struct e1000_adapter *adapter)
 		/* Don't do anything; this is the system default */
 		break;
 	}
+
+	/* store the number of vectors being used */
+	adapter->num_vectors = 1;
 }
 
 /**
@@ -2439,7 +2448,14 @@ static void e1000_irq_disable(struct e1000_adapter *adapter)
 		ew32(EIAC_82574, 0);
 #endif /* CONFIG_E1000E_MSIX */
 	e1e_flush();
-	synchronize_irq(adapter->pdev->irq);
+
+	if (adapter->msix_entries) {
+		int i;
+		for (i = 0; i < adapter->num_vectors; i++)
+			synchronize_irq(adapter->msix_entries[i].vector);
+	} else {
+		synchronize_irq(adapter->pdev->irq);
+	}
 }
 
 /**
@@ -2772,6 +2788,11 @@ static void e1000_set_itr(struct e1000_adapter *adapter)
 		goto set_itr_now;
 	}
 
+	if (adapter->flags2 & FLAG2_DISABLE_AIM) {
+		new_itr = 0;
+		goto set_itr_now;
+	}
+
 	adapter->tx_itr = e1000_update_itr(adapter,
 				    adapter->tx_itr,
 				    adapter->total_tx_packets,
@@ -2821,9 +2842,15 @@ set_itr_now:
 		if (adapter->msix_entries)
 			adapter->rx_ring->set_itr = 1;
 		else
-			ew32(ITR, 1000000000 / (new_itr * 256));
+			if (new_itr)
+				ew32(ITR, 1000000000 / (new_itr * 256));
+			else
+				ew32(ITR, 0);
 #else
-		ew32(ITR, 1000000000 / (new_itr * 256));
+		if (new_itr)
+			ew32(ITR, 1000000000 / (new_itr * 256));
+		else
+			ew32(ITR, 0);
 #endif
 	}
 }
@@ -3215,6 +3242,16 @@ static void e1000_setup_rctl(struct e1000_adapter *adapter)
 	u32 psrctl = 0;
 	u32 pages = 0;
 
+	/* Workaround Si errata on 82579 - configure jumbo frame flow */
+	if (hw->mac.type == e1000_pch2lan) {
+		s32 ret_val;
+
+		if (adapter->netdev->mtu > ETH_DATA_LEN)
+			ret_val = e1000_lv_jumbo_workaround_ich8lan(hw, true);
+		else
+			ret_val = e1000_lv_jumbo_workaround_ich8lan(hw, false);
+	}
+
 	/* Program MC offset vector base */
 	rctl = er32(RCTL);
 	rctl &= ~(3 << E1000_RCTL_MO_SHIFT);
@@ -3248,16 +3285,6 @@ static void e1000_setup_rctl(struct e1000_adapter *adapter)
 		e1e_wphy(hw, 0x10, 0x2823);
 		e1e_wphy(hw, 0x11, 0x0003);
 		e1e_wphy(hw, 22, phy_data);
-	}
-
-	/* Workaround Si errata on 82579 - configure jumbo frame flow */
-	if (hw->mac.type == e1000_pch2lan) {
-		s32 ret_val;
-
-		if (rctl & E1000_RCTL_LPE)
-			ret_val = e1000_lv_jumbo_workaround_ich8lan(hw, true);
-		else
-			ret_val = e1000_lv_jumbo_workaround_ich8lan(hw, false);
 	}
 
 	/* Setup buffer sizes */
@@ -3384,7 +3411,7 @@ static void e1000_configure_rx(struct e1000_adapter *adapter)
 
 	/* irq moderation */
 	ew32(RADV, adapter->rx_abs_int_delay);
-	if (adapter->itr_setting != 0)
+	if ((adapter->itr_setting != 0) && (adapter->itr != 0))
 		ew32(ITR, 1000000000 / (adapter->itr * 256));
 
 	ctrl_ext = er32(CTRL_EXT);
@@ -3431,17 +3458,22 @@ static void e1000_configure_rx(struct e1000_adapter *adapter)
 	 * packet size is equal or larger than the specified value (in 8 byte
 	 * units), e.g. using jumbo frames when setting to E1000_ERT_2048
 	 */
-	if (adapter->flags & FLAG_HAS_ERT) {
+	if ((adapter->flags & FLAG_HAS_ERT) ||
+	    (adapter->hw.mac.type == e1000_pch2lan)) {
 		if (adapter->netdev->mtu > ETH_DATA_LEN) {
 			u32 rxdctl = er32(RXDCTL(0));
 			ew32(RXDCTL(0), rxdctl | 0x3);
-			ew32(ERT, E1000_ERT_2048 | (1 << 13));
+			if (adapter->flags & FLAG_HAS_ERT)
+				ew32(ERT, E1000_ERT_2048 | (1 << 13));
 			/*
 			 * With jumbo frames and early-receive enabled,
 			 * excessive C-state transition latencies result in
 			 * dropped transactions.
 			 */
-#ifdef HAVE_PM_QOS_REQUEST_LIST
+#ifdef HAVE_PM_QOS_REQUEST_ACTIVE
+			pm_qos_update_request(
+				&adapter->netdev->pm_qos_req, 55);
+#elif defined(HAVE_PM_QOS_REQUEST_LIST)
 			pm_qos_update_request(
 				adapter->netdev->pm_qos_req, 55);
 #else
@@ -3449,7 +3481,11 @@ static void e1000_configure_rx(struct e1000_adapter *adapter)
 						  adapter->netdev->name, 55);
 #endif
 		} else {
-#ifdef HAVE_PM_QOS_REQUEST_LIST
+#ifdef HAVE_PM_QOS_REQUEST_ACTIVE
+			pm_qos_update_request(
+				&adapter->netdev->pm_qos_req,
+				PM_QOS_DEFAULT_VALUE);
+#elif defined(HAVE_PM_QOS_REQUEST_LIST)
 			pm_qos_update_request(
 				adapter->netdev->pm_qos_req,
 				PM_QOS_DEFAULT_VALUE);
@@ -3721,7 +3757,33 @@ void e1000e_reset(struct e1000_adapter *adapter)
 		fc->low_water = 0x05048;
 		fc->pause_time = 0x0650;
 		fc->refresh_time = 0x0400;
+		if (adapter->netdev->mtu > ETH_DATA_LEN) {
+			pba = 14;
+			ew32(PBA, pba);
+		}
 		break;
+	}
+
+	/*
+	 * Disable Adaptive Interrupt Moderation if 2 full packets cannot
+	 * fit in receive buffer and early-receive not supported.
+	 */
+	if (adapter->itr_setting & 0x3) {
+		if (((adapter->max_frame_size * 2) > (pba << 10)) &&
+		    !(adapter->flags & FLAG_HAS_ERT)) {
+			if (!(adapter->flags2 & FLAG2_DISABLE_AIM)) {
+				dev_info(pci_dev_to_dev(adapter->pdev),
+					"Interrupt Throttle Rate turned off\n");
+				adapter->flags2 |= FLAG2_DISABLE_AIM;
+				ew32(ITR, 0);
+			}
+		} else if (adapter->flags2 & FLAG2_DISABLE_AIM) {
+			dev_info(pci_dev_to_dev(adapter->pdev),
+				 "Interrupt Throttle Rate turned on\n");
+			adapter->flags2 &= ~FLAG2_DISABLE_AIM;
+			adapter->itr = 20000;
+			ew32(ITR, 1000000000 / (adapter->itr * 256));
+		}
 	}
 
 	/* Allow time for pending master requests to run */
@@ -3761,23 +3823,33 @@ void e1000e_reset(struct e1000_adapter *adapter)
 		phy_data &= ~IGP02E1000_PM_SPD;
 		e1e_wphy(hw, IGP02E1000_PHY_POWER_MGMT, phy_data);
 	}
+
+	/* Workaround Tx hangs on a busy hub in half duplex */
+	if (hw->phy.type == e1000_phy_82579) {
+		u32 ret_val;
+		u16 phy_data;
+
+		ret_val = hw->phy.ops.acquire(hw);
+		if (ret_val)
+			return;
+		ret_val = hw->phy.ops.read_reg_locked(hw,
+						      PHY_REG(BM_PORT_CTRL_PAGE,
+							      17),
+						      &phy_data);
+		if (ret_val)
+			goto release;
+		ret_val = hw->phy.ops.write_reg_locked(hw,
+						      PHY_REG(BM_PORT_CTRL_PAGE,
+							      17),
+						      phy_data & 0x00FF);
+release:
+		hw->phy.ops.release(hw);
+	}
 }
 
 int e1000e_up(struct e1000_adapter *adapter)
 {
 	struct e1000_hw *hw = &adapter->hw;
-
-	/* DMA latency requirement to workaround early-receive/jumbo issue */
-	if (adapter->flags & FLAG_HAS_ERT)
-#ifdef HAVE_PM_QOS_REQUEST_LIST
-		adapter->netdev->pm_qos_req =
-			pm_qos_add_request(PM_QOS_CPU_DMA_LATENCY,
-				       PM_QOS_DEFAULT_VALUE);
-#else
-		pm_qos_add_requirement(PM_QOS_CPU_DMA_LATENCY,
-		                       adapter->netdev->name,
-				       PM_QOS_DEFAULT_VALUE);
-#endif
 
 	/* hardware has been reset, we need to reload some things */
 	e1000_configure(adapter);
@@ -3851,18 +3923,6 @@ void e1000e_down(struct e1000_adapter *adapter)
 		e1000e_reset(adapter);
 	e1000_clean_tx_ring(adapter);
 	e1000_clean_rx_ring(adapter);
-
-#ifdef HAVE_PM_QOS_REQUEST_LIST
-	if (adapter->flags & FLAG_HAS_ERT) {
-		pm_qos_remove_request(
-			      adapter->netdev->pm_qos_req);
-		adapter->netdev->pm_qos_req = NULL;
-	}
-#else
-	if (adapter->flags & FLAG_HAS_ERT)
-		pm_qos_remove_requirement(PM_QOS_CPU_DMA_LATENCY,
-		                          adapter->netdev->name);
-#endif
 
 	/*
 	 * TODO: for power management, we could drop the link and
@@ -4040,13 +4100,18 @@ static int e1000_test_msi(struct e1000_adapter *adapter)
 
 	/* disable SERR in case the MSI write causes a master abort */
 	pci_read_config_word(adapter->pdev, PCI_COMMAND, &pci_cmd);
-	pci_write_config_word(adapter->pdev, PCI_COMMAND,
-			      pci_cmd & ~PCI_COMMAND_SERR);
+	if (pci_cmd & PCI_COMMAND_SERR)
+		pci_write_config_word(adapter->pdev, PCI_COMMAND,
+				      pci_cmd & ~PCI_COMMAND_SERR);
 
 	err = e1000_test_msi_interrupt(adapter);
 
-	/* restore previous setting of command word */
-	pci_write_config_word(adapter->pdev, PCI_COMMAND, pci_cmd);
+	/* re-enable SERR */
+	if (pci_cmd & PCI_COMMAND_SERR) {
+		pci_read_config_word(adapter->pdev, PCI_COMMAND, &pci_cmd);
+		pci_cmd |= PCI_COMMAND_SERR;
+		pci_write_config_word(adapter->pdev, PCI_COMMAND, pci_cmd);
+	}
 
 	/* success ! */
 	if (!err)
@@ -4122,6 +4187,23 @@ static int e1000_open(struct net_device *netdev)
 		e1000_update_mng_vlan(adapter);
 
 #endif
+	/* DMA latency requirement to workaround early-receive/jumbo issue */
+	if ((adapter->flags & FLAG_HAS_ERT) ||
+	    (adapter->hw.mac.type == e1000_pch2lan))
+#ifdef HAVE_PM_QOS_REQUEST_ACTIVE
+		pm_qos_add_request(&adapter->netdev->pm_qos_req,
+				   PM_QOS_CPU_DMA_LATENCY,
+				   PM_QOS_DEFAULT_VALUE);
+#elif defined(HAVE_PM_QOS_REQUEST_LIST)
+		adapter->netdev->pm_qos_req =
+			pm_qos_add_request(PM_QOS_CPU_DMA_LATENCY,
+					   PM_QOS_DEFAULT_VALUE);
+#else
+		pm_qos_add_requirement(PM_QOS_CPU_DMA_LATENCY,
+		                       adapter->netdev->name,
+				       PM_QOS_DEFAULT_VALUE);
+#endif
+
 	/*
 	 * before we allocate an interrupt, we must be ready to handle it.
 	 * Setting DEBUG_SHIRQ in the kernel makes it fire an interrupt
@@ -4236,6 +4318,20 @@ static int e1000_close(struct net_device *netdev)
 	 */
 	if (adapter->flags & FLAG_HAS_AMT)
 		e1000_release_hw_control(adapter);
+
+	if ((adapter->flags & FLAG_HAS_ERT) ||
+	    (adapter->hw.mac.type == e1000_pch2lan))
+#ifdef HAVE_PM_QOS_REQUEST_ACTIVE
+		pm_qos_remove_request(&adapter->netdev->pm_qos_req);
+#elif defined(HAVE_PM_QOS_REQUEST_LIST)
+	{
+		pm_qos_remove_request(adapter->netdev->pm_qos_req);
+		adapter->netdev->pm_qos_req = NULL;
+	}
+#else
+		pm_qos_remove_requirement(PM_QOS_CPU_DMA_LATENCY,
+		                          adapter->netdev->name);
+#endif
 
 	pm_runtime_put_sync(&pdev->dev);
 
@@ -4673,8 +4769,7 @@ static void e1000e_check_82574_phy_workaround(struct e1000_adapter *adapter)
 	 * With 82574 controllers, PHY needs to be checked periodically
 	 * for hung state and reset, if two calls return true
 	 */
-
-	if (e1000_check_phy_82574(hw)) 
+	if (e1000_check_phy_82574(hw))
 		adapter->phy_hang_count++;
 	else
 		adapter->phy_hang_count = 0;
@@ -5534,6 +5629,15 @@ static int e1000_change_mtu(struct net_device *netdev, int new_mtu)
 	if ((new_mtu < ETH_ZLEN + ETH_FCS_LEN + VLAN_HLEN) ||
 	    (max_frame > adapter->max_hw_frame_size)) {
 		e_err("Unsupported MTU setting\n");
+		return -EINVAL;
+	}
+
+	/* Jumbo frame workaround on 82579 requires CRC be stripped */
+	if ((adapter->hw.mac.type == e1000_pch2lan) &&
+	    !(adapter->flags2 & FLAG2_CRC_STRIPPING) &&
+	    (new_mtu > ETH_DATA_LEN)) {
+		e_err("Jumbo Frames not supported on 82579 when CRC "
+		      "stripping is disabled.\n");
 		return -EINVAL;
 	}
 
@@ -6696,11 +6800,8 @@ static int __devinit e1000_probe(struct pci_dev *pdev,
 
 	e1000_print_device_info(adapter);
 
-	if (pci_dev_run_wake(pdev)) {
-		pm_runtime_set_active(&pdev->dev);
-		pm_runtime_enable(&pdev->dev);
-	}
-	pm_schedule_suspend(&pdev->dev, MSEC_PER_SEC);
+	if (pci_dev_run_wake(pdev))
+		pm_runtime_put_noidle(&pdev->dev);
 
 	return 0;
 
@@ -6747,8 +6848,6 @@ static void __devexit e1000_remove(struct pci_dev *pdev)
 	struct e1000_adapter *adapter = netdev_priv(netdev);
 	bool down = test_bit(__E1000_DOWN, &adapter->state);
 
-	pm_runtime_get_sync(&pdev->dev);
-
 	/*
 	 * flush_scheduled work may reschedule our watchdog task, so
 	 * explicitly disable watchdog tasks from being rescheduled
@@ -6773,11 +6872,8 @@ static void __devexit e1000_remove(struct pci_dev *pdev)
 		clear_bit(__E1000_DOWN, &adapter->state);
 	unregister_netdev(netdev);
 
-	if (pci_dev_run_wake(pdev)) {
-		pm_runtime_disable(&pdev->dev);
-		pm_runtime_set_suspended(&pdev->dev);
-	}
-	pm_runtime_put_noidle(&pdev->dev);
+	if (pci_dev_run_wake(pdev))
+		pm_runtime_get_noresume(&pdev->dev);
 
 	/*
 	 * Release control of h/w to f/w.  If f/w is AMT enabled, this

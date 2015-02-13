@@ -54,7 +54,7 @@ struct e1000_info;
 
 
 #ifdef CONFIG_E1000E_MSIX
-/* Interrupt modes, as used by the IntMode paramter */
+/* Interrupt modes, as used by the IntMode parameter */
 #define E1000E_INT_MODE_LEGACY		0
 #define E1000E_INT_MODE_MSI		1
 #define E1000E_INT_MODE_MSIX		2
@@ -232,7 +232,6 @@ struct e1000_adapter {
 	u32 txd_cmd;
 
 	bool detect_tx_hung;
-	int phy_hang_count;
 	u8 tx_timeout_factor;
 
 	u32 tx_int_delay;
@@ -314,6 +313,7 @@ struct e1000_adapter {
 
 	u32 msg_enable;
 #ifdef CONFIG_E1000E_MSIX
+	unsigned int num_vectors;
 	struct msix_entry *msix_entries;
 	int int_mode;
 	u32 eiac_mask;
@@ -337,6 +337,7 @@ struct e1000_adapter {
 	u32 *config_space;
 
 	bool idle_check;
+	int phy_hang_count;
 };
 
 struct e1000_info {
@@ -391,7 +392,8 @@ struct e1000_info {
 #define FLAG2_DISABLE_ASPM_L1             (1 << 3)
 #define FLAG2_HAS_PHY_STATS               (1 << 4)
 #define FLAG2_HAS_EEE                     (1 << 5)
-#define FLAG2_CHECK_PHY_HANG              (1 << 6)
+#define FLAG2_CHECK_PHY_HANG              (1 << 7)
+#define FLAG2_DISABLE_AIM                 (1 << 8)
 
 #define E1000_RX_DESC_PS(R, i)	    \
 	(&(((union e1000_rx_desc_packet_split *)((R).desc))[i]))
