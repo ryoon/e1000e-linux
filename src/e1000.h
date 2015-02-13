@@ -139,7 +139,6 @@ enum e1000_boards {
 	board_pchlan,
 	board_pch2lan,
 	board_pch_lpt,
-	board_pch_spt
 };
 
 struct e1000_ps_page {
@@ -573,6 +572,7 @@ extern const struct e1000_info e1000_ich10_info;
 extern const struct e1000_info e1000_pch_info;
 extern const struct e1000_info e1000_pch2_info;
 extern const struct e1000_info e1000_pch_lpt_info;
+extern const struct e1000_info e1000_pch_spt_info;
 extern const struct e1000_info e1000_es2_info;
 
 #ifdef HAVE_PTP_1588_CLOCK

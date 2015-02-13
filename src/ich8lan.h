@@ -98,10 +98,6 @@
 
 #define E1000_FEXTNVM7_DISABLE_SMB_PERST	0x00000020
 
-#define NVM_SIZE_MULTIPLIER 4096	/*multiplier for NVMS field */
-#define E1000_FLASH_BASE_ADDR 0xE000	/*offset of NVM access regs */
-#define E1000_CTRL_EXT_NVMVS 0x3	/*NVM valid sector */
-
 #define PCIE_ICH8_SNOOP_ALL	PCIE_NO_SNOOP_ALL
 
 #define E1000_ICH_RAR_ENTRIES	7

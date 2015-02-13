@@ -1240,6 +1240,16 @@ void _kc_skb_add_rx_frag(struct sk_buff *skb, int i, struct page *page,
 	skb->truesize += truesize;
 }
 
+#if !(SLE_VERSION_CODE && SLE_VERSION_CODE >= SLE_VERSION(11,3,0))
+int _kc_simple_open(struct inode *inode, struct file *file)
+{
+	if (inode->i_private)
+		file->private_data = inode->i_private;
+
+	return 0;
+}
+#endif /* SLE_VERSION < 11,3,0 */
+
 #endif /* < 3.4.0 */
 
 /******************************************************************************/
@@ -1452,3 +1462,155 @@ int __kc_pci_enable_msix_range(struct pci_dev *dev, struct msix_entry *entries,
 	return nvec;
 }
 #endif /* 3.14.0 */
+
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(3,16,0) )
+#ifdef HAVE_SET_RX_MODE
+#ifdef NETDEV_HW_ADDR_T_UNICAST
+int __kc_hw_addr_sync_dev(struct netdev_hw_addr_list *list,
+			  struct net_device *dev,
+			  int (*sync) (struct net_device *,
+				       const unsigned char *),
+			  int (*unsync) (struct net_device *,
+					 const unsigned char *))
+{
+	struct netdev_hw_addr *ha, *tmp;
+	int err;
+
+	/* first go through and flush out any stale entries */
+	list_for_each_entry_safe(ha, tmp, &list->list, list) {
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(3,10,0) )
+		if (!ha->synced || ha->refcount != 1)
+#else
+		if (!ha->sync_cnt || ha->refcount != 1)
+#endif
+			continue;
+
+		if (unsync && unsync(dev, ha->addr))
+			continue;
+
+		list_del_rcu(&ha->list);
+		kfree_rcu(ha, rcu_head);
+		list->count--;
+	}
+
+	/* go through and sync new entries to the list */
+	list_for_each_entry_safe(ha, tmp, &list->list, list) {
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(3,10,0) )
+		if (ha->synced)
+#else
+		if (ha->sync_cnt)
+#endif
+			continue;
+
+		err = sync(dev, ha->addr);
+		if (err)
+			return err;
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(3,10,0) )
+		ha->synced = true;
+#else
+		ha->sync_cnt++;
+#endif
+		ha->refcount++;
+	}
+
+	return 0;
+}
+
+void __kc_hw_addr_unsync_dev(struct netdev_hw_addr_list *list,
+			     struct net_device *dev,
+			     int (*unsync) (struct net_device *,
+					    const unsigned char *))
+{
+	struct netdev_hw_addr *ha, *tmp;
+
+	list_for_each_entry_safe(ha, tmp, &list->list, list) {
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(3,10,0) )
+		if (!ha->synced)
+#else
+		if (!ha->sync_cnt)
+#endif
+			continue;
+
+		if (unsync && unsync(dev, ha->addr))
+			continue;
+
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(3,10,0) )
+		ha->synced = false;
+#else
+		ha->sync_cnt--;
+#endif
+		if (--ha->refcount)
+			continue;
+
+		list_del_rcu(&ha->list);
+		kfree_rcu(ha, rcu_head);
+		list->count--;
+	}
+}
+
+#endif /* NETDEV_HW_ADDR_T_UNICAST  */
+#ifndef NETDEV_HW_ADDR_T_MULTICAST
+int __kc_dev_addr_sync_dev(struct dev_addr_list **list, int *count,
+			   struct net_device *dev,
+			   int (*sync) (struct net_device *,
+					const unsigned char *),
+			   int (*unsync) (struct net_device *,
+					  const unsigned char *))
+{
+	struct dev_addr_list *da, **next = list;
+	int err;
+
+	/* first go through and flush out any stale entries */
+	while ((da = *next) != NULL) {
+		if (da->da_synced && da->da_users == 1) {
+			if (!unsync || !unsync(dev, da->da_addr)) {
+				*next = da->next;
+				kfree(da);
+				(*count)--;
+				continue;
+			}
+		}
+		next = &da->next;
+	}
+
+	/* go through and sync new entries to the list */
+	for (da = *list; da != NULL; da = da->next) {
+		if (da->da_synced)
+			continue;
+
+		err = sync(dev, da->da_addr);
+		if (err)
+			return err;
+
+		da->da_synced++;
+		da->da_users++;
+	}
+
+	return 0;
+}
+
+void __kc_dev_addr_unsync_dev(struct dev_addr_list **list, int *count,
+			      struct net_device *dev,
+			      int (*unsync) (struct net_device *,
+					     const unsigned char *))
+{
+	struct dev_addr_list *da;
+
+	while ((da = *list) != NULL) {
+		if (da->da_synced) {
+			if (!unsync || !unsync(dev, da->da_addr)) {
+				da->da_synced--;
+				if (--da->da_users == 0) {
+					*list = da->next;
+					kfree(da);
+					(*count)--;
+					continue;
+				}
+			}
+		}
+		list = &da->next;
+	}
+}
+#endif /* NETDEV_HW_ADDR_T_MULTICAST  */
+#endif /* HAVE_SET_RX_MODE */
+#endif /* 3.16.0 */

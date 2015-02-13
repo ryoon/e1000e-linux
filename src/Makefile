@@ -36,11 +36,6 @@ ifeq (,$(BUILD_KERNEL))
 BUILD_KERNEL=$(shell uname -r)
 endif
 
-# Use E1000E_PTP compile flag to enable IEEE-1588 PTP (documented in README)
-ifeq ($(filter %E1000E_PTP,$(CFLAGS_EXTRA)),-DE1000E_PTP)
-  CFILES += ptp.c
-endif
-
 DRIVER_NAME = e1000e
 
 ###########################################################################
@@ -178,11 +173,25 @@ endif
 KVER_CODE := $(shell $(CC) $(EXTRA_CFLAGS) -E -dM $(VSP) 2>/dev/null |\
 	grep -m 1 LINUX_VERSION_CODE | awk '{ print $$3 }' | sed 's/\"//g')
 
+RHEL_CODE := $(shell $(CC) $(EXTRA_CFLAGS) -E -dM $(VSP) 2>/dev/null |\
+	grep -m 1 RHEL_RELEASE_CODE | awk '{ print $$3 }')
+
 # abort the build on kernels older than 2.4.0
 ifneq (1,$(shell [ $(KVER_CODE) -ge 132096 ] && echo 1 || echo 0))
   $(error *** Aborting the build. \
           *** This driver is not supported on kernel versions older than 2.4.0)
 endif
+
+# Use NO_PTP_SUPPORT compile flag to disable IEEE-1588 PTP(documented in README)
+ifneq ($(filter %NO_PTP_SUPPORT,$(CFLAGS_EXTRA)),-DNO_PTP_SUPPORT)
+# Do not attempt to enable PTP on kernels that do not support it
+ifeq (1,$(shell ([ $(KVER_CODE) -ge 196608 ] || [ $(RHEL_CODE) -ge 1540 ]) && echo 1 || echo 0))
+include $(KSRC)/include/config/auto.conf
+ifdef CONFIG_PTP_1588_CLOCK
+CFILES += ptp.c
+endif # CONFIG_PTP_1588_CLOCK
+endif # kernel version >= 3.0
+endif # NO_PTP_SUPPORT
 
 # set the install path
 ifeq (1,$(shell [ $(KVER_CODE) -lt 197120 ] && echo 1 || echo 0))
