@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   Intel PRO/1000 Linux driver
-  Copyright(c) 1999 - 2008 Intel Corporation.
+  Copyright(c) 1999 - 2009 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms and conditions of the GNU General Public License,
@@ -112,6 +112,7 @@ enum e1000_boards {
 	board_ich8lan,
 	board_ich9lan,
 	board_ich10lan,
+	board_82583,
 };
 
 struct e1000_queue_stats {
@@ -205,8 +206,6 @@ struct e1000_adapter {
 	u16 link_speed;
 	u16 link_duplex;
 	u16 eeprom_vers;
-
-	spinlock_t tx_queue_lock; /* prevent concurrent tail updates */
 
 	/* track device up/down/testing state */
 	unsigned long state;

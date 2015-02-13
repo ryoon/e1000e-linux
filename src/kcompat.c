@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   Intel PRO/1000 Linux driver
-  Copyright(c) 1999 - 2008 Intel Corporation.
+  Copyright(c) 1999 - 2009 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms and conditions of the GNU General Public License,
@@ -26,16 +26,7 @@
 
 *******************************************************************************/
 
-
-
-#ifdef DRIVER_E1000E
 #include "e1000.h"
-#endif
-
-
-
-
-
 #include "kcompat.h"
 
 /*****************************************************************************/
@@ -360,26 +351,27 @@ void _kc_free_netdev(struct net_device *netdev)
 #endif /* <= 2.6.18 */
 
 /*****************************************************************************/
-#if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,23) )
-#endif /* < 2.6.23 */
-
-/*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,24) )
 #ifdef NAPI
+/* this function returns the true netdev of the napi struct */
+struct net_device * napi_to_netdev(struct napi_struct *napi)
+{
+	struct adapter_struct *adapter = container_of(napi,
+	                                              struct adapter_struct,
+	                                              napi);
+	return adapter->netdev;
+}
+
 int __kc_adapter_clean(struct net_device *netdev, int *budget)
 {
 	int work_done;
 	int work_to_do = min(*budget, netdev->quota);
 	struct adapter_struct *adapter = netdev_priv(netdev);
-#ifdef DRIVER_E1000E
 	struct napi_struct *napi = &adapter->napi;
-#else
-	struct napi_struct *napi = &adapter->rx_ring[0].napi;
-#endif
 	work_done = napi->poll(napi, work_to_do);
 	*budget -= work_done;
 	netdev->quota -= work_done;
-	return work_done ? 1 : 0;
+	return (work_done >= work_to_do) ? 1 : 0;
 }
 #endif /* NAPI */
 #endif /* <= 2.6.24 */
@@ -418,4 +410,8 @@ void _kc_netif_tx_start_all_queues(struct net_device *netdev)
 			netif_start_subqueue(netdev, i);
 }
 #endif /* HAVE_TX_MQ */
-#endif /* <= 2.6.27 */
+#endif /* < 2.6.27 */
+
+/*****************************************************************************/
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,29) )
+#endif /* < 2.6.29 */

@@ -4,7 +4,7 @@
 .\"
 .\" * Other names and brands may be claimed as the property of others.
 .\"
-.TH e1000e 1 "May 29, 2008"
+.TH e1000e 1 "December 30, 2008"
 
 .SH NAME
 e1000e \-This file describes the Linux* Base Driver for the Gigabit Family of Adapters.
@@ -129,15 +129,17 @@ recompile. If the driver load fails to enable a specific interrupt mode, the
 driver will try other interrupt modes, from least to most compatible.  The 
 interrupt order is MSI-X, MSI, Legacy.  If specifying MSI (IntMode=1) 
 interrupts, only MSI and Legacy will be attempted.
-.LP
-.B WriteProtectNVM
+.B CrcStripping
 .IP
-.B Valid Range:
+.B Valid Range: 
 0-1
-.BDefault Value: 
+.br
+.B Default Value: 
 1 (enabled)
 .IP
-This option is applicable only on ICHx (8256x) parts.  By default, the NVM is write-protected in order to prevent malicious accesses of the mapped NVM control register space which could potentially corrupt the NVM resulting in an unusable LAN device.  This option is provided to override that protection in order to update the NVM as-needed via ethtool or other means.  Once any necessary NVM change is complete, it is highly recommended to reload the driver with this option set back to the default (enabled) to reinstate the write-protection.
+Strip the CRC from received packets before sending up the network stack.  If 
+you have a machine with a BMC enabled but cannot receive IPMI traffic after
+loading or enabling the driver, try disabling this feature.
 .SH JUMBO FRAMES
 .LP
 Jumbo Frames support is enabled by changing the MTU to a value larger than the default of 1500.  Use the ifconfig command to increase the MTU size.  For example:

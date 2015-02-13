@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   Intel PRO/1000 Linux driver
-  Copyright(c) 1999 - 2008 Intel Corporation.
+  Copyright(c) 1999 - 2009 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms and conditions of the GNU General Public License,
@@ -608,6 +608,7 @@ static int e1000_set_eeprom(struct net_device *netdev,
 	 * and flush shadow RAM for applicable controllers
 	 */
 	if ((first_word <= NVM_CHECKSUM_REG) ||
+	    (hw->mac.type == e1000_82583) ||
 	    (hw->mac.type == e1000_82574) ||
 	    (hw->mac.type == e1000_82573))
 		ret_val = e1000e_update_nvm_checksum(hw);
@@ -820,6 +821,7 @@ static int e1000_reg_test(struct e1000_adapter *adapter, u64 *data)
 		break;
 	case e1000_82573:
 	case e1000_82574:
+	case e1000_82583:
 	case e1000_ich8lan:
 	case e1000_ich9lan:
 	case e1000_ich10lan:
@@ -1847,6 +1849,7 @@ static int e1000_phys_id(struct net_device *netdev, u32 data)
 		data = INT_MAX;
 
 	if ((hw->phy.type == e1000_phy_ife) ||
+	    (hw->mac.type == e1000_82583) ||
 	    (hw->mac.type == e1000_82574)) {
 		if (!adapter->blink_timer.function) {
 			init_timer(&adapter->blink_timer);

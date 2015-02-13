@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   Intel PRO/1000 Linux driver
-  Copyright(c) 1999 - 2008 Intel Corporation.
+  Copyright(c) 1999 - 2009 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms and conditions of the GNU General Public License,
@@ -51,6 +51,7 @@ struct e1000_hw;
 #define E1000_DEV_ID_82573E_IAMT              0x108C
 #define E1000_DEV_ID_82573L                   0x109A
 #define E1000_DEV_ID_82574L                   0x10D3
+#define E1000_DEV_ID_82583V                   0x150C
 #define E1000_DEV_ID_80003ES2LAN_COPPER_DPT   0x1096
 #define E1000_DEV_ID_80003ES2LAN_SERDES_DPT   0x1098
 #define E1000_DEV_ID_80003ES2LAN_COPPER_SPT   0x10BA
@@ -85,12 +86,16 @@ struct e1000_hw;
 #define E1000_FUNC_0     0
 #define E1000_FUNC_1     1
 
+#define E1000_ALT_MAC_ADDRESS_OFFSET_LAN0   0
+#define E1000_ALT_MAC_ADDRESS_OFFSET_LAN1   3
+
 enum e1000_mac_type {
 	e1000_undefined = 0,
 	e1000_82571,
 	e1000_82572,
 	e1000_82573,
 	e1000_82574,
+	e1000_82583,
 	e1000_80003es2lan,
 	e1000_ich8lan,
 	e1000_ich9lan,
@@ -194,6 +199,13 @@ enum e1000_smart_speed {
 	e1000_smart_speed_default = 0,
 	e1000_smart_speed_on,
 	e1000_smart_speed_off
+};
+
+enum e1000_serdes_link_state {
+	e1000_serdes_link_down = 0,
+	e1000_serdes_link_autoneg_progress,
+	e1000_serdes_link_autoneg_complete,
+	e1000_serdes_link_forced_up
 };
 
 /* Receive Descriptor */
@@ -551,6 +563,7 @@ struct e1000_mac_info {
 	bool autoneg_failed;
 	bool get_link_status;
 	bool in_ifs_mode;
+	enum e1000_serdes_link_state serdes_link_state;
 	bool serdes_has_link;
 	bool tx_pkt_filtering;
 };

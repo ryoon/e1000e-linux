@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   Intel PRO/1000 Linux driver
-  Copyright(c) 1999 - 2008 Intel Corporation.
+  Copyright(c) 1999 - 2009 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms and conditions of the GNU General Public License,
@@ -463,8 +463,8 @@ s32 e1000e_copper_link_setup_m88(struct e1000_hw *hw)
 	if (ret_val)
 		goto out;
 
-	/* For newer PHYs this bit is downshift enable */
-	if (phy->type == e1000_phy_m88)
+	/* For BM PHY this bit is downshift enable */
+	if (phy->type != e1000_phy_bm)
 		phy_data |= M88E1000_PSCR_ASSERT_CRS_ON_TX;
 
 	/*
@@ -2281,7 +2281,7 @@ static s32 e1000_access_phy_wakeup_reg_bm(struct e1000_hw *hw, u32 offset,
                                           u16 *data, bool read)
 {
 	s32 ret_val;
-	u16 reg = ((u16)offset);
+	u16 reg = BM_PHY_REG_NUM(offset);
 	u16 phy_reg = 0;
 	u8  phy_acquired = 1;
 
@@ -2336,15 +2336,15 @@ static s32 e1000_access_phy_wakeup_reg_bm(struct e1000_hw *hw, u32 offset,
 	if (read) {
 	        /* Read the page 800 value using opcode 0x12 */
 		ret_val = e1000e_read_phy_reg_mdic(hw, BM_WUC_DATA_OPCODE,
-							data);
+		                                  data);
 	} else {
-	        /* Read the page 800 value using opcode 0x12 */
+	        /* Write the page 800 value using opcode 0x12 */
 		ret_val = e1000e_write_phy_reg_mdic(hw, BM_WUC_DATA_OPCODE,
-							*data);
+		                                   *data);
 	}
 
 	if (ret_val) {
-		e_dbg("Could not read data value from page 800\n");
+		e_dbg("Could not access data value from page 800\n");
 		goto out;
 	}
 

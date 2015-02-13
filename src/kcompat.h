@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   Intel PRO/1000 Linux driver
-  Copyright(c) 1999 - 2008 Intel Corporation.
+  Copyright(c) 1999 - 2009 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms and conditions of the GNU General Public License,
@@ -50,68 +50,22 @@
 #include <asm/io.h>
 
 /* NAPI enable/disable flags here */
-
-#ifdef DRIVER_E1000E
 #define NAPI
-#endif
-
-
-#ifdef _E1000_H_
-#ifdef CONFIG_E1000_NAPI
-#define NAPI
-#endif
-#ifdef E1000_NAPI
-#undef NAPI
-#define NAPI
-#endif
-#ifdef E1000E_NAPI
-#undef NAPI
-#define NAPI
-#endif
-#ifdef E1000_NO_NAPI
-#undef NAPI
-#endif
 #ifdef E1000E_NO_NAPI
 #undef NAPI
 #endif
-#endif
 
-
-
-
-
-
-
-#ifdef DRIVER_E1000E
 #define adapter_struct e1000_adapter
 #define CONFIG_E1000E_MSIX
-#endif
-
-
-
-
 
 /* and finally set defines so that the code sees the changes */
 #ifdef NAPI
-#ifndef CONFIG_E1000_NAPI
-#define CONFIG_E1000_NAPI
-#endif
 #ifndef CONFIG_E1000E_NAPI
 #define CONFIG_E1000E_NAPI
 #endif
 #else
-#undef CONFIG_E1000_NAPI
 #undef CONFIG_E1000E_NAPI
-#undef CONFIG_IXGB_NAPI
-#endif
-
-/* packet split disable/enable */
-#ifdef DISABLE_PACKET_SPLIT
-#undef CONFIG_E1000_DISABLE_PACKET_SPLIT
-#define CONFIG_E1000_DISABLE_PACKET_SPLIT
-#undef CONFIG_IGB_DISABLE_PACKET_SPLIT
-#define CONFIG_IGB_DISABLE_PACKET_SPLIT
-#endif
+#endif /* NAPI */
 
 /* MSI compatibility code for all kernels and drivers */
 #ifdef DISABLE_PCI_MSI
@@ -141,7 +95,6 @@ struct msix_entry {
 #ifndef PMSG_SUSPEND
 #define PMSG_SUSPEND 3
 #endif
-
 
 /* generic boolean compatibility */
 #undef TRUE
@@ -227,6 +180,12 @@ struct msix_entry {
 #ifndef NETIF_F_GSO
 #define gso_size tso_size
 #define gso_segs tso_segs
+#endif
+
+#ifndef NETIF_F_GRO
+#define vlan_gro_receive(_napi, _vlgrp, _vlan, _skb) \
+		vlan_hwaccel_receive_skb(_skb, _vlgrp, _vlan)
+#define napi_gro_receive(_napi, _skb) netif_receive_skb(_skb)
 #endif
 
 #ifndef CHECKSUM_PARTIAL
@@ -775,6 +734,16 @@ extern void _kc_pci_disable_device(struct pci_dev *pdev);
 	(void) (&_x == &_y);		\
 	_x > _y ? _x : _y; })
 
+#define min_t(type,x,y) ({ \
+	type _x = (x); \
+	type _y = (y); \
+	_x < _y ? _x : _y; })
+
+#define max_t(type,x,y) ({ \
+	type _x = (x); \
+	type _y = (y); \
+	_x > _y ? _x : _y; })
+
 #ifndef list_for_each_safe
 #define list_for_each_safe(pos, n, head) \
 	for (pos = (head)->next, n = pos->next; pos != (head); \
@@ -847,12 +816,6 @@ extern void _kc_pci_unmap_page(struct pci_dev *dev, u64 dma_addr, size_t size, i
 /* 2.4.22 => 2.4.17 */
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,4,22) )
 #define pci_name(x)	((x)->slot_name)
-#endif
-
-/*****************************************************************************/
-/* 2.4.22 => 2.4.17 */
-
-#if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,4,22) )
 #endif
 
 /*****************************************************************************/
@@ -1019,10 +982,6 @@ static inline void INIT_HLIST_NODE(struct hlist_node *h)
 #define might_sleep()
 #endif
 
-#ifndef NETREG_REGISTERED
-#define NETREG_REGISTERED 1
-#define reg_state deadbeaf
-#endif
 #endif /* <= 2.5.0 */
 
 /*****************************************************************************/
@@ -1286,7 +1245,7 @@ static inline unsigned long _kc_usecs_to_jiffies(const unsigned int m)
 #define ADVERTISE_PAUSE_ASYM    0x0800  /* Try for asymmetric pause     */
 /* 1000BASE-T Control register */
 #define ADVERTISE_1000FULL      0x0200  /* Advertise 1000BASE-T full duplex */
-#endif
+#endif /* < 2.6.12 */
 
 /*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,14) )
@@ -1303,7 +1262,7 @@ extern void *_kc_kzalloc(size_t size, int flags);
 /* Extended status register. */
 #define ESTATUS_1000_TFULL	0x2000	/* Can do 1000BT Full */
 #define ESTATUS_1000_THALF	0x1000	/* Can do 1000BT Half */
-#endif
+#endif /* < 2.6.14 */
 
 /*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,15) )
@@ -1313,6 +1272,9 @@ extern void *_kc_kzalloc(size_t size, int flags);
 #ifndef device_set_wakeup_enable
 #define device_set_wakeup_enable(dev, val)	do{}while(0)
 #endif
+#ifndef device_init_wakeup
+#define device_init_wakeup(dev,val) do {} while (0)
+#endif
 #endif /* < 2.6.15 */
 
 /*****************************************************************************/
@@ -1321,7 +1283,7 @@ extern void *_kc_kzalloc(size_t size, int flags);
 #else /* 2.6.16 and above */
 #undef HAVE_PCI_ERS
 #define HAVE_PCI_ERS
-#endif
+#endif /* < 2.6.16 */
 
 /*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,18) )
@@ -1384,6 +1346,10 @@ static inline int _kc_skb_is_gso(const struct sk_buff *skb)
 #if (!(( RHEL_RELEASE_CODE > RHEL_RELEASE_VERSION(4,4) ) && ( RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(5,0) ) || ( RHEL_RELEASE_CODE > RHEL_RELEASE_VERSION(5,0) ) || (AX_RELEASE_CODE > AX_RELEASE_VERSION(3,0))))
 typedef irqreturn_t (*irq_handler_t)(int, void*, struct pt_regs *);
 #endif
+#if (RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(6,0))
+#undef CONFIG_INET_LRO
+#undef CONFIG_INET_LRO_MODULE
+#endif
 typedef irqreturn_t (*new_handler_t)(int, void*);
 static inline irqreturn_t _kc_request_irq(unsigned int irq, new_handler_t handler, unsigned long flags, const char *devname, void *dev_id)
 #else /* 2.4.x */
@@ -1404,14 +1370,10 @@ static inline int _kc_request_irq(unsigned int irq, new_handler_t handler, unsig
 #define PCIE_CONFIG_SPACE_LEN 256
 #define PCI_CONFIG_SPACE_LEN 64
 #define PCIE_LINK_STATUS 0x12
-#ifdef DRIVER_E1000E
 #define pci_config_space_ich8lan() { \
 	if (adapter->flags & FLAG_IS_ICH) \
 		size = PCIE_CONFIG_SPACE_LEN; \
 }
-#else
-#define pci_config_space_ich8lan() do {} while (0)
-#endif
 #undef pci_save_state
 extern int _kc_pci_save_state(struct pci_dev *);
 #define pci_save_state(pdev) _kc_pci_save_state(pdev)
@@ -1423,12 +1385,16 @@ extern void _kc_pci_restore_state(struct pci_dev *);
 extern void _kc_free_netdev(struct net_device *);
 #define free_netdev(netdev) _kc_free_netdev(netdev)
 #endif
-#define pci_enable_pcie_error_reporting(dev) do {} while (0)
+static inline int pci_enable_pcie_error_reporting(struct pci_dev *dev)
+{
+	return 0;
+}
 #define pci_disable_pcie_error_reporting(dev) do {} while (0)
 #define pci_cleanup_aer_uncorrect_error_status(dev) do {} while (0)
 #else /* 2.6.19 */
 #include <linux/aer.h>
 #endif /* < 2.6.19 */
+
 /*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,20) )
 #if ( LINUX_VERSION_CODE >= KERNEL_VERSION(2,5,28) )
@@ -1459,6 +1425,8 @@ do { \
 
 /*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,21) )
+#define to_net_dev(class) container_of(class, struct net_device, class_dev)
+#define NETDEV_CLASS_DEV
 #define vlan_group_get_device(vg, id) (vg->vlan_devices[id])
 #define vlan_group_set_device(vg, id, dev) if (vg) vg->vlan_devices[id] = dev;
 #define pci_channel_offline(pdev) (pdev->error_state && \
@@ -1495,6 +1463,13 @@ do { \
 #define ETH_FCS_LEN 4
 #endif
 #define cancel_work_sync(x) flush_scheduled_work()
+#ifndef udp_hdr
+#define udp_hdr _udp_hdr
+static inline struct udphdr *_udp_hdr(const struct sk_buff *skb)
+{
+	return (struct udphdr *)skb_transport_header(skb);
+}
+#endif
 #endif /* < 2.6.22 */
 
 /*****************************************************************************/
@@ -1515,10 +1490,8 @@ struct napi_struct {
 };
 #ifdef NAPI
 extern int __kc_adapter_clean(struct net_device *, int *);
-#define netif_rx_complete(netdev, napi) netif_rx_complete(netdev)
-#define netif_rx_schedule_prep(netdev, napi) netif_rx_schedule_prep(netdev)
-#define netif_rx_schedule(netdev, napi) netif_rx_schedule(netdev)
-#define __netif_rx_schedule(netdev, napi) __netif_rx_schedule(netdev)
+extern struct net_device * napi_to_netdev(struct napi_struct *);
+#define napi_to_poll_dev(napi) napi_to_netdev(napi)
 #define napi_enable(napi) netif_poll_enable(adapter->netdev)
 #define napi_disable(napi) netif_poll_disable(adapter->netdev)
 #define netif_napi_add(_netdev, _napi, _poll, _weight) \
@@ -1531,6 +1504,10 @@ extern int __kc_adapter_clean(struct net_device *, int *);
 		netif_poll_disable(_netdev); \
 	} while (0)
 #define netif_napi_del(_a) do {} while (0)
+#define napi_schedule_prep(napi) netif_rx_schedule_prep(napi_to_netdev(napi))
+#define napi_schedule(napi) netif_rx_schedule(napi_to_poll_dev(napi))
+#define __napi_schedule(napi) __netif_rx_schedule(napi_to_poll_dev(napi))
+#define napi_complete(napi) netif_rx_complete(napi_to_poll_dev(napi))
 #else /* NAPI */
 #define netif_napi_add(_netdev, _napi, _poll, _weight) \
 	do { \
@@ -1546,6 +1523,8 @@ extern int __kc_adapter_clean(struct net_device *, int *);
 #undef dev_get_by_name
 #define dev_get_by_name(_a, _b) dev_get_by_name(_b)
 #define __netif_subqueue_stopped(_a, _b) netif_subqueue_stopped(_a, _b)
+#else /* < 2.6.24 */
+#define HAVE_NETDEV_NAPI_LIST
 #endif /* < 2.6.24 */
 
 /*****************************************************************************/
@@ -1588,7 +1567,6 @@ extern int __kc_adapter_clean(struct net_device *, int *);
 #include <linux/pci-aspm.h>
 #define HAVE_NETDEV_VLAN_FEATURES
 #endif /* < 2.6.26 */
-
 /*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,27) )
 #if ( LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,15) )
@@ -1601,12 +1579,10 @@ extern int __kc_adapter_clean(struct net_device *, int *);
 			pci_read_config_word(adapter->pdev, pm + PCI_PM_PMC, \
 				&pmc); \
 		} \
-		if (val && (pmc >> 11)) \
-			(dev)->power.can_wakeup = !!(val); \
-		(dev)->power.should_wakeup = !!(val); \
+		(dev)->power.can_wakeup = !!(pmc >> 11); \
+		(dev)->power.should_wakeup = (val && (pmc >> 11)); \
 	} while (0)
 #endif /* 2.6.15 through 2.6.27 */
-
 #ifndef netif_napi_del
 #define netif_napi_del(_a) do {} while (0)
 #ifdef NAPI
@@ -1620,8 +1596,6 @@ extern int __kc_adapter_clean(struct net_device *, int *);
 #define pci_dma_mapping_error(pdev, dma_addr) pci_dma_mapping_error(dma_addr)
 #endif
 
-#ifdef CONFIG_NETDEVICES_MULTIQUEUE
-#endif
 
 #ifdef HAVE_TX_MQ
 extern void _kc_netif_tx_stop_all_queues(struct net_device *);
@@ -1647,7 +1621,11 @@ extern void _kc_netif_tx_start_all_queues(struct net_device *);
 #else /* CONFIG_NETDEVICES_MULTIQUEUE */
 #define netif_tx_stop_all_queues(a) netif_stop_queue(a)
 #define netif_tx_wake_all_queues(a) netif_wake_queue(a)
+#if ( LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,12) )
 #define netif_tx_start_all_queues(a) netif_start_queue(a)
+#else
+#define netif_tx_start_all_queues(a) do {} while (0)
+#endif
 #define netif_stop_subqueue(_ndev,_qi) netif_stop_queue((_ndev))
 #define netif_start_subqueue(_ndev,_qi) netif_start_queue((_ndev))
 #endif /* CONFIG_NETDEVICES_MULTIQUEUE */
@@ -1658,6 +1636,18 @@ extern void _kc_netif_tx_start_all_queues(struct net_device *);
 #endif /* NETIF_F_MULTI_QUEUE */
 #else /* < 2.6.27 */
 #define HAVE_TX_MQ
+#define HAVE_NETDEV_SELECT_QUEUE
 #endif /* < 2.6.27 */
 
+/*****************************************************************************/
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,28) )
+#define pci_ioremap_bar(pdev, bar)	ioremap(pci_resource_start(pdev, bar), \
+					        pci_resource_len(pdev, bar))
+#endif /* < 2.6.28 */
+
+/*****************************************************************************/
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,29) )
+#define pci_request_selected_regions_exclusive(pdev, bars, name) \
+		pci_request_selected_regions(pdev, bars, name)
+#endif /* < 2.6.29 */
 #endif /* _KCOMPAT_H_ */

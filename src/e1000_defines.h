@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   Intel PRO/1000 Linux driver
-  Copyright(c) 1999 - 2008 Intel Corporation.
+  Copyright(c) 1999 - 2009 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms and conditions of the GNU General Public License,
@@ -125,6 +125,7 @@
 #define E1000_CTRL_EXT_IPS       0x00004000 /* Invert Power State */
 #define E1000_CTRL_EXT_SPD_BYPS  0x00008000 /* Speed Select Bypass */
 #define E1000_CTRL_EXT_RO_DIS    0x00020000 /* Relaxed Ordering disable */
+#define E1000_CTRL_EXT_DMA_DYN_CLK_EN 0x00080000 /* DMA Dynamic Clock Gating */
 #define E1000_CTRL_EXT_LINK_MODE_MASK 0x00C00000
 #define E1000_CTRL_EXT_LINK_MODE_GMII 0x00000000
 #define E1000_CTRL_EXT_LINK_MODE_TBI  0x00C00000
@@ -672,6 +673,7 @@
 #define E1000_PBA_20K 0x0014
 #define E1000_PBA_22K 0x0016
 #define E1000_PBA_24K 0x0018
+#define E1000_PBA_26K 0x001A
 #define E1000_PBA_30K 0x001E
 #define E1000_PBA_32K 0x0020
 #define E1000_PBA_34K 0x0022
@@ -878,6 +880,10 @@
  */
 #define E1000_RAR_ENTRIES     15
 #define E1000_RAH_AV  0x80000000        /* Receive descriptor valid */
+#define E1000_RAL_MAC_ADDR_LEN 4
+#define E1000_RAH_MAC_ADDR_LEN 2
+#define E1000_RAH_POOL_MASK 0x03FC0000
+#define E1000_RAH_POOL_1 0x00040000
 
 /* Error Codes */
 #define E1000_SUCCESS      0
@@ -893,6 +899,7 @@
 #define E1000_BLK_PHY_RESET   12
 #define E1000_ERR_SWFW_SYNC 13
 #define E1000_NOT_IMPLEMENTED 14
+#define E1000_ERR_MBX      15
 
 /* Loop limit on how long we wait for auto-negotiation to complete */
 #define FIBER_LINK_UP_LIMIT               50

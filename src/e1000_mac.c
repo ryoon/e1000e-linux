@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   Intel PRO/1000 Linux driver
-  Copyright(c) 1999 - 2008 Intel Corporation.
+  Copyright(c) 1999 - 2009 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms and conditions of the GNU General Public License,
@@ -171,6 +171,7 @@ void e1000e_write_vfta_generic(struct e1000_hw *hw, u32 offset, u32 value)
 void e1000e_init_rx_addrs(struct e1000_hw *hw, u16 rar_count)
 {
 	u32 i;
+	u8 mac_addr[ETH_ADDR_LEN] = {0};
 
 	/* Setup the receive address */
 	e_dbg("Programming MAC Address into RAR[0]\n");
@@ -179,12 +180,8 @@ void e1000e_init_rx_addrs(struct e1000_hw *hw, u16 rar_count)
 
 	/* Zero out the other (rar_entry_count - 1) receive addresses */
 	e_dbg("Clearing RAR[1-%u]\n", rar_count-1);
-	for (i = 1; i < rar_count; i++) {
-		E1000_WRITE_REG_ARRAY(hw, E1000_RA, (i << 1), 0);
-		e1e_flush();
-		E1000_WRITE_REG_ARRAY(hw, E1000_RA, ((i << 1) + 1), 0);
-		e1e_flush();
-	}
+	for (i = 1; i < rar_count; i++)
+		hw->mac.ops.rar_set(hw, mac_addr, i);
 }
 
 /**
@@ -218,8 +215,7 @@ s32 e1000_check_alt_mac_addr_generic(struct e1000_hw *hw)
 	}
 
 	if (hw->bus.func == E1000_FUNC_1)
-		nvm_alt_mac_addr_offset += ETH_ADDR_LEN/sizeof(u16);
-
+		nvm_alt_mac_addr_offset += E1000_ALT_MAC_ADDRESS_OFFSET_LAN1;
 	for (i = 0; i < ETH_ADDR_LEN; i += 2) {
 		offset = nvm_alt_mac_addr_offset + (i >> 1);
 		ret_val = e1000_read_nvm(hw, offset, 1, &nvm_data);
@@ -276,12 +272,13 @@ void e1000e_rar_set(struct e1000_hw *hw, u8 *addr, u32 index)
 
 	/*
 	 * Some bridges will combine consecutive 32-bit writes into
-	 * a single burst write, which will malfunction on some
-	 * 82546 parts.  The flush avoids this.
+	 * a single burst write, which will malfunction on some parts.
+	 * The flushes avoid this.
 	 */
 	ew32(RAL(index), rar_low);
 	e1e_flush();
 	ew32(RAH(index), rar_high);
+	e1e_flush();
 }
 
 /**
@@ -338,6 +335,7 @@ void e1000e_update_mc_addr_list_generic(struct e1000_hw *hw,
 {
 	u32 hash_value;
 	u32 i;
+	u8 mac_addr[ETH_ADDR_LEN] = {0};
 
 	/*
 	 * Load the first set of multicast addresses into the exact
@@ -350,10 +348,7 @@ void e1000e_update_mc_addr_list_generic(struct e1000_hw *hw,
 			mc_addr_count--;
 			mc_addr_list += ETH_ADDR_LEN;
 		} else {
-			E1000_WRITE_REG_ARRAY(hw, E1000_RA, i << 1, 0);
-			e1e_flush();
-			E1000_WRITE_REG_ARRAY(hw, E1000_RA, (i << 1) + 1, 0);
-			e1e_flush();
+			hw->mac.ops.rar_set(hw, mac_addr, i);
 		}
 	}
 

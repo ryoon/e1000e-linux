@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   Intel PRO/1000 Linux driver
-  Copyright(c) 1999 - 2008 Intel Corporation.
+  Copyright(c) 1999 - 2009 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms and conditions of the GNU General Public License,
@@ -94,6 +94,25 @@
 #define IGP3_VR_CTRL_DEV_POWERDOWN_MODE_MASK 0x0300
 #define IGP3_VR_CTRL_MODE_SHUTDOWN           0x0200
 #define IGP3_PM_CTRL_FORCE_PWR_DOWN          0x0020
+
+/* PHY Wakeup Registers and defines */
+#define BM_RCTL         PHY_REG(BM_WUC_PAGE, 0)
+#define BM_WUC          PHY_REG(BM_WUC_PAGE, 1)
+#define BM_WUFC         PHY_REG(BM_WUC_PAGE, 2)
+#define BM_WUS          PHY_REG(BM_WUC_PAGE, 3)
+#define BM_RAR_L(_i)    (BM_PHY_REG(BM_WUC_PAGE, 16 + ((_i) << 2)))
+#define BM_RAR_M(_i)    (BM_PHY_REG(BM_WUC_PAGE, 17 + ((_i) << 2)))
+#define BM_RAR_H(_i)    (BM_PHY_REG(BM_WUC_PAGE, 18 + ((_i) << 2)))
+#define BM_RAR_CTRL(_i) (BM_PHY_REG(BM_WUC_PAGE, 19 + ((_i) << 2)))
+#define BM_MTA(_i)      (BM_PHY_REG(BM_WUC_PAGE, 128 + ((_i) << 1)))
+
+#define BM_RCTL_UPE           0x0001          /* Unicast Promiscuous Mode */
+#define BM_RCTL_MPE           0x0002          /* Multicast Promiscuous Mode */
+#define BM_RCTL_MO_SHIFT      3               /* Multicast Offset Shift */
+#define BM_RCTL_MO_MASK       (3 << 3)        /* Multicast Offset Mask */
+#define BM_RCTL_BAM           0x0020          /* Broadcast Accept Mode */
+#define BM_RCTL_PMCF          0x0040          /* Pass MAC Control Frames */
+#define BM_RCTL_RFCE          0x0080          /* Rx Flow Control Enable */
 
 /*
  * Additional interrupts need to be handled for ICH family:

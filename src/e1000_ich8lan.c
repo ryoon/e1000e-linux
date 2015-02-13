@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   Intel PRO/1000 Linux driver
-  Copyright(c) 1999 - 2008 Intel Corporation.
+  Copyright(c) 1999 - 2009 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms and conditions of the GNU General Public License,
@@ -106,6 +106,13 @@ static s32  e1000_write_flash_data_ich8lan(struct e1000_hw *hw, u32 offset,
                                            u8 size, u16 data);
 static s32 e1000_get_cfg_done_ich8lan(struct e1000_hw *hw);
 static void e1000_power_down_phy_copper_ich8lan(struct e1000_hw *hw);
+static void e1000_rar_set_ich8lan(struct e1000_hw *hw, u8 *mac_addr, u32 index);
+static void e1000_mta_set_ich8lan(struct e1000_hw *hw, u32 hash_value);
+static void e1000_update_mc_addr_list_ich8lan(struct e1000_hw *hw,
+                                              u8 *mc_addr_list,
+                                              u32 mc_addr_count,
+                                              u32 rar_used_count,
+                                              u32 rar_count);
 
 /* ICH GbE Flash Hardware Sequencing Flash Status Register bit breakdown */
 /* Offset 04h HSFSTS */
@@ -189,7 +196,7 @@ static s32 e1000_init_phy_params_ich8lan(struct e1000_hw *hw)
 		phy->ops.read_reg  = e1000e_read_phy_reg_bm;
 		ret_val = e1000e_determine_phy_address(hw);
 		if (ret_val) {
-			e_dbg("Cannot determine PHY address. Erroring out\n");
+			e_dbg("Cannot determine PHY addr. Erroring out\n");
 			goto out;
 		}
 	}
@@ -340,14 +347,16 @@ static s32 e1000_init_mac_params_ich8lan(struct e1000_hw *hw)
 	mac->ops.setup_physical_interface = e1000_setup_copper_link_ich8lan;
 	/* check for link */
 	mac->ops.check_for_link = e1000e_check_for_copper_link;
+	/* receive address register setting */
+	mac->ops.rar_set = e1000_rar_set_ich8lan;
 	/* check management mode */
 	mac->ops.check_mng_mode = e1000_check_mng_mode_ich8lan;
 	/* link info */
 	mac->ops.get_link_up_info = e1000_get_link_up_info_ich8lan;
 	/* multicast address update */
-	mac->ops.update_mc_addr_list = e1000e_update_mc_addr_list_generic;
+	mac->ops.update_mc_addr_list = e1000_update_mc_addr_list_ich8lan;
 	/* setting MTA */
-	mac->ops.mta_set = e1000_mta_set_generic;
+	mac->ops.mta_set = e1000_mta_set_ich8lan;
 	/* clear hardware counters */
 	mac->ops.clear_hw_cntrs = e1000_clear_hw_cntrs_ich8lan;
 
@@ -1989,8 +1998,14 @@ static s32 e1000_init_hw_ich8lan(struct e1000_hw *hw)
 
 	/* Zero out the Multicast HASH table */
 	e_dbg("Zeroing the MTA\n");
-	for (i = 0; i < mac->mta_reg_count; i++)
+	for (i = 0; i < mac->mta_reg_count; i++) {
 		E1000_WRITE_REG_ARRAY(hw, E1000_MTA, i, 0);
+		if ((hw->phy.type != e1000_phy_ife) &&
+		    (hw->phy.type != e1000_phy_igp_3)) {
+			e1e_wphy(hw, BM_MTA(i), 0);
+			e1e_wphy(hw, BM_MTA(i) + 1, 0);
+		}
+	}
 
 	/* Setup link and flow control */
 	ret_val = mac->ops.setup_link(hw);
@@ -2170,17 +2185,18 @@ static s32 e1000_setup_copper_link_ich8lan(struct e1000_hw *hw)
 	if (ret_val)
 		goto out;
 
-	if (hw->phy.type == e1000_phy_igp_3) {
+	switch (hw->phy.type) {
+	case e1000_phy_igp_3:
 		ret_val = e1000e_copper_link_setup_igp(hw);
 		if (ret_val)
 			goto out;
-	} else if (hw->phy.type == e1000_phy_bm) {
+		break;
+	case e1000_phy_bm:
 		ret_val = e1000e_copper_link_setup_m88(hw);
 		if (ret_val)
 			goto out;
-	}
-
-	if (hw->phy.type == e1000_phy_ife) {
+		break;
+	case e1000_phy_ife:
 		ret_val = e1e_rphy(hw, IFE_PHY_MDIX_CONTROL,
 		                               &reg_data);
 		if (ret_val)
@@ -2204,6 +2220,9 @@ static s32 e1000_setup_copper_link_ich8lan(struct e1000_hw *hw)
 		                                reg_data);
 		if (ret_val)
 			goto out;
+		break;
+	default:
+		break;
 	}
 	ret_val = e1000e_setup_copper_link(hw);
 
@@ -2441,18 +2460,21 @@ out:
  *  'LPLU Enabled' and 'Gig Disable' to force link speed negotiation
  *  to a lower speed.
  *
- *  Should only be called for ICH9 and ICH10 devices.
+ *  Should only be called for applicable parts.
  **/
 void e1000e_disable_gig_wol_ich8lan(struct e1000_hw *hw)
 {
 	u32 phy_ctrl;
 
-	if ((hw->mac.type == e1000_ich10lan) ||
-	    (hw->mac.type == e1000_ich9lan)) {
+	switch (hw->mac.type) {
+	case e1000_ich9lan:
+	case e1000_ich10lan:
 		phy_ctrl = er32(PHY_CTRL);
 		phy_ctrl |= E1000_PHY_CTRL_D0A_LPLU |
 		            E1000_PHY_CTRL_GBE_DISABLE;
 		ew32(PHY_CTRL, phy_ctrl);
+	default:
+		break;
 	}
 
 	return;
@@ -2565,6 +2587,109 @@ static void e1000_power_down_phy_copper_ich8lan(struct e1000_hw *hw)
 		e1000_power_down_phy_copper(hw);
 
 	return;
+}
+
+/**
+ *  e1000_rar_set_ich8lan - Set receive address register
+ *  @hw: pointer to the HW structure
+ *  @mac_addr: pointer to the receive address
+ *  @index: receive address array register
+ *
+ *  Sets the receive address array register at index to the address passed
+ *  in by mac_addr.  For parts with PHY Recieve Address Registers, set that
+ *  too as it is needed for PHY wakeup.
+ **/
+static void e1000_rar_set_ich8lan(struct e1000_hw *hw, u8 *mac_addr, u32 index)
+{
+	u32 rar;
+
+	e1000e_rar_set(hw, mac_addr, index);
+
+	if ((hw->phy.type == e1000_phy_ife) ||
+	    (hw->phy.type == e1000_phy_igp_3))
+		return;
+
+	/* copy MAC RAR to PHY RAR */
+	rar = er32(RAL(index));
+	e1e_wphy(hw, BM_RAR_L(index), (u16)(rar & 0xFFFF));
+	e1e_wphy(hw, BM_RAR_M(index), (u16)((rar >> 16) & 0xFFFF));
+
+	rar = er32(RAH(index));
+	e1e_wphy(hw, BM_RAR_H(index), (u16)(rar & 0xFFFF));
+	e1e_wphy(hw, BM_RAR_CTRL(index),
+	                      (u16)((rar >> 16) & 0xFFFF));
+}
+
+/**
+ *  e1000_mta_set_ich8lan - Set multicast filter table address
+ *  @hw: pointer to the HW structure
+ *  @hash_value: determines the MTA register and bit to set
+ *
+ *  Set the MAC MTA register via e1000_mta_set_generic() and copy to
+ *  the appropriate PHY MTA register.
+ **/
+static void e1000_mta_set_ich8lan(struct e1000_hw *hw, u32 hash_value)
+{
+	u32 hash_bit, hash_reg, mta;
+
+	e1000_mta_set_generic(hw, hash_value);
+
+	if ((hw->phy.type == e1000_phy_ife) ||
+	    (hw->phy.type == e1000_phy_igp_3))
+		return;
+
+	/*
+	 * The PHY MTA is a register array of 16-bit registers.  It is
+	 * treated like an array of (2*16*mta_reg_count) bits.  We want to
+	 * copy the applicable word of the 32-bit MAC MTA register to the
+	 * corresponding PHY register.  The (hw->mac.mta_reg_count - 1)
+	 * serves as a mask to bits 31:5 of the hash value which gives the
+	 * MAC register modified above. The lower 5 bits of the hash value
+	 * determine which bit was set above.
+	 */
+	hash_reg = (hash_value >> 5) & (hw->mac.mta_reg_count - 1);
+	hash_bit = hash_value & 0x1F;
+
+	mta = E1000_READ_REG_ARRAY(hw, E1000_MTA, hash_reg);
+
+	e1e_wphy(hw, BM_MTA(hash_reg), (u16)(mta & 0xFFFF));
+	e1e_wphy(hw, BM_MTA(hash_reg) + 1,
+	                      (u16)((mta >> 16) & 0xFFFF));
+}
+
+/**
+ *  e1000_update_mc_addr_list_ich8lan - Update Multicast addresses
+ *  @hw: pointer to the HW structure
+ *  @mc_addr_list: array of multicast addresses to program
+ *  @mc_addr_count: number of multicast addresses to program
+ *  @rar_used_count: the first RAR register free to program
+ *  @rar_count: total number of supported Receive Address Registers
+ *
+ *  Updates the Receive Address Registers and Multicast Table Array.
+ *  The caller must have a packed mc_addr_list of multicast addresses.
+ *  The parameter rar_count will usually be hw->mac.rar_entry_count
+ *  unless there are workarounds that change this.
+ **/
+static void e1000_update_mc_addr_list_ich8lan(struct e1000_hw *hw,
+                                              u8 *mc_addr_list,
+                                              u32 mc_addr_count,
+                                              u32 rar_used_count,
+                                              u32 rar_count)
+{
+	u32 i;
+
+	if ((hw->phy.type != e1000_phy_ife) &&
+	    (hw->phy.type != e1000_phy_igp_3)) {
+		/* Clear the old settings from the PHY MTA */
+		e_dbg("Clearing PHY MTA\n");
+		for (i = 0; i < hw->mac.mta_reg_count; i++) {
+			e1e_wphy(hw, BM_MTA(i), 0);
+			e1e_wphy(hw, BM_MTA(i) + 1, 0);
+		}
+	}
+
+	e1000e_update_mc_addr_list_generic(hw, mc_addr_list, mc_addr_count,
+	                                  rar_used_count, rar_count);
 }
 
 /**
