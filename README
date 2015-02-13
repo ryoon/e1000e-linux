@@ -1,7 +1,7 @@
 Linux* Base Driver for Intel(R) Ethernet Network Connection
 ===========================================================
 
-April 14, 2011
+November 30, 2011
 
 Contents
 ========
@@ -519,31 +519,27 @@ Additional Configurations
   See ftp://robur.slu.se/pub/Linux/net-development/NAPI/usenix-paper.tgz for 
   more information on NAPI.
 
-  To Enable a Separate Vector for TX
-  ---------------------------------- 
-  # make CFLAGS_EXTRA=-DCONFIG_E1000E_SEPARATE_TX_HANDLER
-
-  This will allocate a separate handler for tx cleanups. This might be useful 
-  if you have a lot of CPU cores under heavy load and want to spread the 
-  processing load around.  
-
-  With this option, you would get three MSI-X vectors: one for TX, one for RX, 
-  and one for link.
 
 Known Issues/Troubleshooting
 ============================
 
-For known hardware and troubleshooting issues, refer to the following website.
+Hardware Issues:
+----------------
+For known hardware and troubleshooting issues, either refer to the "Release 
+Notes" in your User Guide, or for more detailed information, go to the
+following website:
 
-    http://support.intel.com/support/go/network/adapter/home.htm
+    http://www.intel.com
 
-Either select the link for your adapter or perform a search for the adapter 
-number. The adapter's page lists many issues. For a complete list of hardware
-issues download your adapter's user guide and read the Release Notes.  
+In the search box enter your devices controller ID followed by "spec update" 
+(i.e., 82599 spec update). The spec update file has complete information on
+known hardware issues.
 
-  NOTE: After installing the driver, if your Intel Ethernet Network Connection 
-  is not working, verify in the "In This Release" section of the readme that 
-  you have installed the correct driver.
+Software Issues:
+----------------
+
+  NOTE: After installing the driver, if your Intel Ethernet Network Connection
+  is not working, verify that you have installed the correct driver.
 
   Intel(R) Active Management Technology 2.0, 2.1, 2.5 not supported in 
   conjunction with Linux driver
@@ -731,6 +727,16 @@ issues download your adapter's user guide and read the Release Notes.
   link prior to acquiring a DHCP address; however there is usually a way to 
   work around this (e.g. set LINKDELAY in the interface configuration on RHEL).
 
+  Tx flow control is disabled by default on 82577 and 82578-based adapters
+  ------------------------------------------------------------------------
+
+  Possible performance degradation on certain 82566 and 82577 devices
+  ------------------------------------------------------------------- 
+  Internal stress testing with jumbo frames shows the reliability on some
+  82566 and 82567 devices is improved in certain corner cases by disabling the
+  Early Receive feature. Doing so can impact Tx performance. To reduce the
+  impact, the packet buffer sizes and relevant flow control settings are
+  modified accordingly.
 
 Support
 =======
