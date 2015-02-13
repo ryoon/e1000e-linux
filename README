@@ -1,7 +1,7 @@
 Linux* Base Driver for Intel(R) Network Connection
 ===============================================================
 
-February 20, 2007
+May 14, 2008
 
 Contents
 ========
@@ -23,6 +23,8 @@ This file describes the e1000e Linux* Base Driver for Intel Network Connection.
 This driver supports kernel versions 2.4.x and 2.6.x.  This driver includes 
 support for Itanium(R)2-based systems.
 
+NOTE: The 82546GB part requires the e1000 driver, not the e1000e driver.
+ 
 This driver is only supported as a loadable module at this time.  Intel is
 not supplying patches against the kernel source to allow for static linking
 of the driver.  For questions related to hardware requirements, refer to the
@@ -318,12 +320,26 @@ This workaround skips resetting the Phy at shutdown for the initial
 silicon releases of ICH8 systems.
 
 
+IntMode
+-------
+Valid Range: 0-2
+Default Value: 1 
+(0=legacy, 1=MSI, 2=MSI-X)
+
+Allows changing the interrupt mode at module load time, without requiring a
+recompile. If the driver load fails to enable a specific interrupt mode, the
+driver will try other interrupt modes, from least to most compatible.  The 
+interrupt order is MSI-X, MSI, Legacy.  If specifying MSI (IntMode=1) 
+interrupts, only MSI and Legacy will be attempted.
+
+
 Additional Configurations
 =========================
 
   Configuring the Driver on Different Distributions
   -------------------------------------------------
   Configuring a network driver to load properly when the system is started
+(0=legacy, 1=MSI, 2=MSI-X)
   is distribution dependent.  Typically, the configuration process involves
   adding an alias line to /etc/modules.conf or /etc/modprobe.conf as well
   as editing other system startup scripts and/or configuration files.  Many
@@ -335,6 +351,7 @@ Additional Configurations
 
   As an example, if you install the e1000e driver for two Gigabit adapters
   (eth0 and eth1) and set the speed and duplex to 10full and 100half, add
+(0=legacy, 1=MSI, 2=MSI-X)
   the following to modules.conf or or modprobe.conf:
 
        alias eth0 e1000e
@@ -440,7 +457,22 @@ Additional Configurations
   NAPI (Rx polling mode) is supported in the e1000e driver.  NAPI is enabled
   by default.
 
+  To disable NAPI, compile the driver module, passing in a configuration option:
+
+       make CFLAGS_EXTRA=-DE1000E_NO_NAPI install
+
   See www.cyberus.ca/~hadi/usenix-paper.tgz for more information on NAPI.
+
+  To Enable a Separate Vector for TX
+  ---------------------------------- 
+  # make CFLAGS_EXTRA=-DCONFIG_E1000E_SEPARATE_TX_HANDLER
+
+  This will allocate a separate handler for tx cleanups. This might be useful 
+  if you have a lot of CPU cores under heavy load and want to spread the 
+  processing load around.  
+
+  With this option, you would get three MSI-X vectors: one for TX, one for RX, 
+  and one for link.
 
 
 Known Issues/Troubleshooting
@@ -464,6 +496,13 @@ This issue MAY be resolved by updating to the latest kernel and BIOS. The
 user is encouraged to run an OS that fully supports MSI interrupts. You can 
 check your system's BIOS by downloading the Linux Firmware Developer Kit 
 that can be obtained at http://www.linuxfirmwarekit.org/
+
+Adapters with 4 ports behind a PCIe bridge 
+------------------------------------------
+Adapters that have 4 ports behind a PCIe bridge may be incompatible with 
+some systems. The user should run the Linux firmware kit from 
+http://www.linuxfirmwarekit.org to test their BIOS, if they have interrupt or 
+"missing interface" problems, especially with older kernels.
 
 82573(V/L/E) TX Unit Hang Messages
 ----------------------------------
@@ -594,7 +633,6 @@ become unresponsive to keyboard commands, except for control-alt-delete.
 Restarting the system appears to be the only remedy.
 
 
-
 Support
 =======
 
@@ -616,7 +654,7 @@ License
 =======
 
 Intel Gigabit Linux driver.
-Copyright(c) 1999 - 2006 Intel Corporation.
+Copyright(c) 1999 - 2008 Intel Corporation.
 
 This program is free software; you can redistribute it and/or modify it
 under the terms and conditions of the GNU General Public License,

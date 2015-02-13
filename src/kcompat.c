@@ -27,9 +27,6 @@
 *******************************************************************************/
 
 
-#ifdef DRIVER_E1000
-#include "e1000.h"
-#endif
 
 #ifdef DRIVER_E1000E
 #include "e1000.h"
@@ -292,6 +289,10 @@ struct sk_buff *_kc_netdev_alloc_skb(struct net_device *dev,
 	return skb;
 }
 #endif /* <= 2.6.17 */
+
+/*****************************************************************************/
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,23) )
+#endif /* < 2.6.23 */
 
 /*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,24) )

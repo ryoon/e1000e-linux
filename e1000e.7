@@ -4,7 +4,7 @@
 .\"
 .\" * Other names and brands may be claimed as the property of others.
 .\"
-.TH e1000e 1 "February 20, 2008"
+.TH e1000e 1 "May 29, 2008"
 
 .SH NAME
 e1000e \-This file describes the Linux* Base Driver for the Gigabit Family of Adapters.
@@ -129,7 +129,22 @@ Allows Phy to turn off in lower power states. The user can turn off this paramet
 1 (enabled)
 .IP
 This workaround skips resetting the Phy at shutdown for the initial silicon releases of ICH8 systems.
+.LP
 
+.B IntMode
+.IP
+.B Valid Range: 
+0-2 (0=legacy, 1=MSI, 2=MSI-X)
+.br
+.B Default Value: 
+2 (MSI-X)
+.IP
+Allows changing the interrupt mode at module load time, without requiring a
+recompile. If the driver load fails to enable a specific interrupt mode, the
+driver will try other interrupt modes, from least to most compatible.  The 
+interrupt order is MSI-X, MSI, Legacy.  If specifying MSI (IntMode=1) 
+interrupts, only MSI and Legacy will be attempted.
+.LP
 
 .SH JUMBO FRAMES
 .LP
@@ -145,22 +160,29 @@ The maximum MTU setting for Jumbo Frames is 9216.  This value coincides with the
 Adapters based on the Intel(R) 82573V/E controllers do not support Jumbo Frames.
 .LP
 See the section "Jumbo Frames" in Readme.
+.LP
 
 
 .SH Ethtool
 .LP
 The driver utilizes the ethtool interface for driver configuration and diagnostics, as well as displaying statistical information.  Ethtool version 3 or later is required for this functionality, although we strongly recommend downloading the latest version at: http://sourceforge.net/projects/gkernel.
+.LP
 
 .SH SPEED AND DUPLEX SETTINGS
 .LP
 Speed and Duplex are configured through the Ethtool* utility.  Ethtool is included with all versions of Red Hat after Red Hat7.2.  For other Linux distributions, download and install Ethtool from the following website: http://sourceforge.net/projects/gkernel.  
+.LP
 
 .SH NAPI
 .LP
-NAPI (Rx polling mode) is supported in the e1000e driver.  NAPI is enabled or disabled based on the configuration of the kernel. 
+NAPI (Rx polling mode) is supported in the e1000e driver.  NAPI is enabled by default. 
+.LP
+To disable NAPI, compile the driver module, passing in a configuration option:
+.IP
+make CFLAGS_EXTRA=-DE1000E_NO_NAPI install
 .LP
 See www.cyberus.ca/~hadi/usenix-paper.tgz for more information on NAPI.
-
+.LP
 
 .SH SUPPORT
 .LP

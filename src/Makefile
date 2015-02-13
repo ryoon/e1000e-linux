@@ -28,12 +28,14 @@
 
 ###########################################################################
 # Driver files
-FAMILYC = 82571.c ich8lan.c es2lan.c
-FAMILYH = 
+FAMILYC = e1000_82571.c e1000_ich8lan.c e1000_80003es2lan.c
+FAMILYH = e1000_82571.h e1000_ich8lan.h e1000_80003es2lan.h
 
 # core driver files
-CFILES = netdev.c ethtool.c param.c $(FAMILYC) phy.c lib.c kcompat.c
-HFILES = e1000.h hw.h defines.h kcompat.h
+CFILES = netdev.c ethtool.c param.c $(FAMILYC) \
+         e1000_mac.c e1000_nvm.c e1000_phy.c e1000_manage.c kcompat.c
+HFILES = e1000.h e1000_osdep.h e1000_hw.h e1000_regs.h e1000_defines.h \
+         e1000_mac.h e1000_nvm.h e1000_phy.h e1000_manage.h $(FAMILYH) kcompat.h
 ifeq (,$(BUILD_KERNEL))
 BUILD_KERNEL=$(shell uname -r)
 endif

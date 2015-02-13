@@ -130,6 +130,18 @@ E1000_PARAM(InterruptThrottleRate, "Interrupt Throttling Rate");
 #define MAX_ITR 100000
 #define MIN_ITR 100
 
+#ifdef CONFIG_E1000E_MSIX
+/* IntMode (Interrupt Mode)
+ *
+ * Valid Range: 0 - 2
+ *
+ * Default Value: 2 (MSI-X)
+ */
+E1000_PARAM(IntMode, "Interrupt Mode");
+#define MAX_INTMODE	2
+#define MIN_INTMODE	0
+
+#endif /* CONFIG_E1000E_MSIX */
 /*
  * Enable Smart Power Down of the PHY
  *
@@ -216,7 +228,7 @@ static int __devinit e1000_validate_option(unsigned int *value,
 }
 
 /**
- * e1000e_check_options - Range Checking for Command Line Parameters
+ * e1000_check_options - Range Checking for Command Line Parameters
  * @adapter: board private structure
  *
  * This routine checks all command line parameters for valid user
@@ -224,7 +236,7 @@ static int __devinit e1000_validate_option(unsigned int *value,
  * value exists, a default value is used.  The final value is stored
  * in a variable in the adapter structure.
  **/
-void __devinit e1000e_check_options(struct e1000_adapter *adapter)
+void __devinit e1000_check_options(struct e1000_adapter *adapter)
 {
 	struct e1000_hw *hw = &adapter->hw;
 	int bd = adapter->bd_number;
@@ -348,14 +360,27 @@ void __devinit e1000e_check_options(struct e1000_adapter *adapter)
 				adapter->itr = 20000;
 				break;
 			default:
-				e1000_validate_option(&adapter->itr, &opt,
-					adapter);
 				/*
-				 * save the setting, because the dynamic bits
-				 * change itr. clear the lower two bits
-				 * because they are used as control
+				 * Save the setting, because the dynamic bits
+				 * change itr.
 				 */
-				adapter->itr_setting = adapter->itr & ~3;
+				if (e1000_validate_option(&adapter->itr, &opt,
+				                          adapter) &&
+				    (adapter->itr == 3)) {
+					/*
+					 * In case of invalid user value,
+					 * default to conservative mode.
+					 */
+					adapter->itr_setting = adapter->itr;
+					adapter->itr = 20000;
+				} else {
+					/*
+					 * Clear the lower two bits because
+					 * they are used as control.
+					 */
+					adapter->itr_setting =
+						adapter->itr & ~3;
+				}
 				break;
 			}
 		} else {
@@ -363,6 +388,26 @@ void __devinit e1000e_check_options(struct e1000_adapter *adapter)
 			adapter->itr = 20000;
 		}
 	}
+#ifdef CONFIG_E1000E_MSIX
+	{ /* Interrupt Mode */
+		struct e1000_option opt = {
+			.type = range_option,
+			.name = "Interrupt Mode",
+			.err  = "defaulting to 2 (MSI-X)",
+			.def  = E1000E_INT_MODE_MSIX,
+			.arg  = { .r = { .min = MIN_INTMODE,
+			.max = MAX_INTMODE }}
+		};
+
+		if (num_IntMode > bd) {
+			unsigned int int_mode = IntMode[bd];
+			e1000_validate_option(&int_mode, &opt, adapter);
+			adapter->int_mode = int_mode;
+		} else {
+			adapter->int_mode = opt.def;
+		}
+	}
+#endif /* CONFIG_E1000E_MSIX */
 	{ /* Smart Power Down */
 		const struct e1000_option opt = {
 			.type = enable_option,
@@ -391,11 +436,11 @@ void __devinit e1000e_check_options(struct e1000_adapter *adapter)
 			unsigned int kmrn_lock_loss = KumeranLockLoss[bd];
 			e1000_validate_option(&kmrn_lock_loss, &opt, adapter);
 			if (hw->mac.type == e1000_ich8lan)
-				e1000e_set_kmrn_lock_loss_workaround_ich8lan(hw,
+				e1000_set_kmrn_lock_loss_workaround_ich8lan(hw,
 								kmrn_lock_loss);
 		} else {
 			if (hw->mac.type == e1000_ich8lan)
-				e1000e_set_kmrn_lock_loss_workaround_ich8lan(hw,
+				e1000_set_kmrn_lock_loss_workaround_ich8lan(hw,
 								       opt.def);
 		}
 	}
