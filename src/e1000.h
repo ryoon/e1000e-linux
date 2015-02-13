@@ -317,6 +317,7 @@ struct e1000_adapter {
 	unsigned long led_status;
 
 	unsigned int flags;
+	unsigned int flags2;
 	u32 *config_space;
 	u32 stats_freq_us;		/* stats update freq (microseconds) */
 };
@@ -324,6 +325,7 @@ struct e1000_adapter {
 struct e1000_info {
 	e1000_mac_type		mac;
 	unsigned int		flags;
+	unsigned int		flags2;
 	u32			pba;
 	void			(*init_ops)(struct e1000_hw *);
 	s32			(*get_variants)(struct e1000_adapter *);
@@ -363,6 +365,7 @@ struct e1000_info {
 #define FLAG_MSI_TEST_FAILED              (1 << 30)
 #define FLAG_RX_RESTART_NOW               (1 << 31)
 
+#define FLAG2_READ_ONLY_NVM               (1 << 1)
 
 #define E1000_RX_DESC_PS(R, i)	    \
 	(&(((union e1000_rx_desc_packet_split *)((R).desc))[i]))

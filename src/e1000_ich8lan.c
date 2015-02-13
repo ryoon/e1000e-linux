@@ -1531,6 +1531,7 @@ static s32 e1000_update_nvm_checksum_ich8lan(struct e1000_hw *hw)
 	 * programming failed.
 	 */
 	if (ret_val) {
+		/* Possibly read-only, see e1000e_write_protect_nvm_ich8lan() */
 		DEBUGOUT("Flash commit failed.\n");
 		nvm->ops.release(hw);
 		goto out;
@@ -1625,6 +1626,49 @@ static s32 e1000_validate_nvm_checksum_ich8lan(struct e1000_hw *hw)
 
 out:
 	return ret_val;
+}
+
+/**
+ *  e1000e_write_protect_nvm_ich8lan - Make the NVM read-only
+ *  @hw: pointer to the HW structure
+ *
+ *  To prevent malicious write/erase of the NVM, set it to be read-only
+ *  so that the hardware ignores all write/erase cycles of the NVM via
+ *  the flash control registers.  The shadow-ram copy of the NVM will
+ *  still be updated, however any updates to this copy will not stick
+ *  across driver reloads.
+ **/
+void e1000e_write_protect_nvm_ich8lan(struct e1000_hw *hw)
+{
+	union ich8_flash_protected_range pr0;
+	union ich8_hws_flash_status hsfsts;
+	u32 gfpreg;
+	s32 ret_val;
+
+	ret_val = e1000_acquire_swflag_ich8lan(hw);
+	if (ret_val)
+		return;
+
+	gfpreg = E1000_READ_FLASH_REG(hw, ICH_FLASH_GFPREG);
+
+	/* Write-protect GbE Sector of NVM */
+	pr0.regval = E1000_READ_FLASH_REG(hw, ICH_FLASH_PR0);
+	pr0.range.base = gfpreg & FLASH_GFPREG_BASE_MASK;
+	pr0.range.limit = ((gfpreg >> 16) & FLASH_GFPREG_BASE_MASK);
+	pr0.range.wpe = true;
+	E1000_WRITE_FLASH_REG(hw, ICH_FLASH_PR0, pr0.regval);
+
+	/*
+	 * Lock down a subset of GbE Flash Control Registers, e.g.
+	 * PR0 to prevent the write-protection from being lifted.
+	 * Once FLOCKDN is set, the registers protected by it cannot
+	 * be written until FLOCKDN is cleared by a hardware reset.
+	 */
+	hsfsts.regval = E1000_READ_FLASH_REG16(hw, ICH_FLASH_HSFSTS);
+	hsfsts.hsf_status.flockdn = true;
+	E1000_WRITE_FLASH_REG16(hw, ICH_FLASH_HSFSTS, hsfsts.regval);
+
+	e1000_release_swflag_ich8lan(hw);
 }
 
 /**

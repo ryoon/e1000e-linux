@@ -1,13 +1,14 @@
 Linux* Base Driver for Intel(R) Network Connection
 ===============================================================
 
-May 14, 2008
+August 18, 2008
 
 Contents
 ========
 
 - In This Release
 - Identifying Your Adapter
+- Upgrading
 - Building and Installation
 - Command Line Parameters
 - Speed and Duplex Configuration
@@ -68,6 +69,20 @@ networking link on the left to search for your adapter:
 
     http://downloadcenter.intel.com/scripts-df-external/Support_Intel.aspx
 
+Upgrading
+=========
+
+If you currently have the e1000 driver installed and need to install e1000e,
+perform the following:
+
+ - If your version of e1000 is 7.6.15.5 or less, upgrade to e1000 version 8.x,
+   using the instructions in the e1000 README. 
+ - Install the e1000e driver using the instructions in the Building and 
+   Installation section below.
+ - Modify /etc/modprobe.conf to point your PCIe devices to use the new e1000e 
+   driver using alias ethX e1000e, or use your distribution's specific method 
+   for configuring network adapters like RedHat's setup/system-config-network
+   or SuSE's yast2.
 
 Building and Installation
 =========================
@@ -130,8 +145,19 @@ NOTE: For the build to work properly, the currently running kernel MUST
    is the IP address for another machine on the same subnet as the
    interface that is being tested:
 
-     ping  <IP_address>	
+     ping  <IP_address>
 
+TROUBLESHOOTING: Some systems have trouble supporting MSI and/or MSI-X 
+interrupts.  If you believe your system needs to disable this style of 
+interrupt, the driver can be built and installed with the command:
+
+     make CFLAGS_EXTRA=-DDISABLE_PCI_MSI install
+
+Normally the driver will generate an interrupt every two seconds, so if
+you can see that you're no longer getting interrupts in
+cat /proc/interrupts for the ethX e1000e device, then this workaround
+may be necessary.
+	
 
 Command Line Parameters
 =======================
@@ -339,7 +365,6 @@ Additional Configurations
   Configuring the Driver on Different Distributions
   -------------------------------------------------
   Configuring a network driver to load properly when the system is started
-(0=legacy, 1=MSI, 2=MSI-X)
   is distribution dependent.  Typically, the configuration process involves
   adding an alias line to /etc/modules.conf or /etc/modprobe.conf as well
   as editing other system startup scripts and/or configuration files.  Many
@@ -351,12 +376,11 @@ Additional Configurations
 
   As an example, if you install the e1000e driver for two Gigabit adapters
   (eth0 and eth1) and set the speed and duplex to 10full and 100half, add
-(0=legacy, 1=MSI, 2=MSI-X)
   the following to modules.conf or or modprobe.conf:
 
        alias eth0 e1000e
        alias eth1 e1000e
-       options e1000e Speed=10,100 Duplex=2,1
+       options e1000e IntMode=2,1
 
   Viewing Link Messages
   ---------------------
@@ -631,6 +655,13 @@ In kernel versions 2.5.50 and later (including 2.6 kernel), unplugging
 the network cable while ethtool -p is running will cause the system to 
 become unresponsive to keyboard commands, except for control-alt-delete.  
 Restarting the system appears to be the only remedy.
+
+MSI-X Issues with Kernels between 2.6.19 - 2.6.21 (inclusive)
+-------------------------------------------------------------
+Kernel panics and instability may be observed on any MSI-X hardware if you use
+irqbalance with kernels between 2.6.19 and 2.6.21. If such problems are 
+encountered, you may disable the irqbalance daemon or upgrade to a newer 
+kernel.
 
 
 Support

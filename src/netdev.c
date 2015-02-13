@@ -56,7 +56,7 @@
 
 #define DRV_DEBUG
 
-#define DRV_VERSION "0.4.1.7" DRV_NAPI DRV_DEBUG
+#define DRV_VERSION "0.4.1.12" DRV_NAPI DRV_DEBUG
 char e1000e_driver_name[] = "e1000e";
 const char e1000e_driver_version[] = DRV_VERSION;
 
@@ -446,7 +446,7 @@ map_skb:
 		buffer_info->dma = pci_map_single(pdev, skb->data,
 						  adapter->rx_buffer_len,
 						  PCI_DMA_FROMDEVICE);
-		if (pci_dma_mapping_error(buffer_info->dma)) {
+		if (pci_dma_mapping_error(pdev, buffer_info->dma)) {
 			dev_err(&pdev->dev, "RX DMA map failed\n");
 			adapter->rx_dma_failed++;
 			break;
@@ -516,7 +516,7 @@ static void e1000_alloc_rx_buffers_ps(struct e1000_adapter *adapter,
 						   ps_page->page,
 						   0, PAGE_SIZE,
 						   PCI_DMA_FROMDEVICE);
-				if (pci_dma_mapping_error(ps_page->dma)) {
+				if (pci_dma_mapping_error(pdev, ps_page->dma)) {
 					dev_err(&adapter->pdev->dev,
 					  "RX DMA page map failed\n");
 					adapter->rx_dma_failed++;
@@ -551,7 +551,7 @@ static void e1000_alloc_rx_buffers_ps(struct e1000_adapter *adapter,
 		buffer_info->dma = pci_map_single(pdev, skb->data,
 						  adapter->rx_ps_bsize0,
 						  PCI_DMA_FROMDEVICE);
-		if (pci_dma_mapping_error(buffer_info->dma)) {
+		if (pci_dma_mapping_error(pdev, buffer_info->dma)) {
 			dev_err(&pdev->dev, "RX DMA map failed\n");
 			adapter->rx_dma_failed++;
 			/* cleanup skb */
@@ -4231,6 +4231,7 @@ static int e1000_tx_map(struct e1000_adapter *adapter,
 			unsigned int mss)
 {
 	struct e1000_ring *tx_ring = adapter->tx_ring;
+	struct pci_dev *pdev = adapter->pdev;
 	struct e1000_buffer *buffer_info;
 	unsigned int len = skb->len - skb->data_len;
 	unsigned int offset = 0, size, count = 0, i;
@@ -4250,8 +4251,8 @@ static int e1000_tx_map(struct e1000_adapter *adapter,
 				skb->data + offset,
 				size,
 				PCI_DMA_TODEVICE);
-		if (pci_dma_mapping_error(buffer_info->dma)) {
-			dev_err(&adapter->pdev->dev, "TX DMA map failed\n");
+		if (pci_dma_mapping_error(pdev, buffer_info->dma)) {
+			dev_err(&pdev->dev, "TX DMA map failed\n");
 			adapter->tx_dma_failed++;
 			return -1;
 		}
@@ -4284,7 +4285,7 @@ static int e1000_tx_map(struct e1000_adapter *adapter,
 					offset,
 					size,
 					PCI_DMA_TODEVICE);
-			if (pci_dma_mapping_error(buffer_info->dma)) {
+			if (pci_dma_mapping_error(pdev, buffer_info->dma)) {
 				dev_err(&adapter->pdev->dev,
 					"TX DMA page map failed\n");
 				adapter->tx_dma_failed++;
@@ -5183,6 +5184,7 @@ static int __devinit e1000_probe(struct pci_dev *pdev,
 	adapter->ei = ei;
 	adapter->pba = ei->pba;
 	adapter->flags = ei->flags;
+	adapter->flags2 = ei->flags2;
 	adapter->hw.back = adapter;
 	adapter->hw.mac.type = ei->mac;
 	adapter->msg_enable = (1 << NETIF_MSG_DRV | NETIF_MSG_PROBE) - 1;
@@ -5249,6 +5251,10 @@ static int __devinit e1000_probe(struct pci_dev *pdev,
 	netdev->poll_controller		= e1000_netpoll;
 #endif
 	strncpy(netdev->name, pci_name(pdev), sizeof(netdev->name) - 1);
+
+	if ((adapter->flags & FLAG_IS_ICH) &&
+	    (adapter->flags2 & FLAG2_READ_ONLY_NVM))
+		e1000e_write_protect_nvm_ich8lan(&adapter->hw);
 
 	hw->mac.ops.get_bus_info(&adapter->hw);
 

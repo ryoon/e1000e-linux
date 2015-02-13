@@ -492,6 +492,7 @@ struct e1000_mac_operations {
 struct e1000_phy_operations {
 	s32  (*init_params)(struct e1000_hw *);
 	s32  (*acquire)(struct e1000_hw *);
+	s32  (*cfg_on_link_up)(struct e1000_hw *);
 	s32  (*check_polarity)(struct e1000_hw *);
 	s32  (*check_reset_block)(struct e1000_hw *);
 	s32  (*commit)(struct e1000_hw *);

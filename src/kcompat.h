@@ -52,7 +52,6 @@
 /* NAPI enable/disable flags here */
 
 #ifdef DRIVER_E1000E
-#define CONFIG_E1000E_NAPI
 #define NAPI
 #endif
 
@@ -1065,14 +1064,6 @@ static inline void _kc_synchronize_irq(void)
 extern void _kc_skb_fill_page_desc(struct sk_buff *skb, int i, struct page *page, int off, int size);
 #endif
 
-#ifndef pci_dma_mapping_error
-#define pci_dma_mapping_error _kc_pci_dma_mapping_error
-static inline int _kc_pci_dma_mapping_error(dma_addr_t dma_addr)
-{
-	return dma_addr == 0;
-}
-#endif
-
 #undef ALIGN
 #define ALIGN(x,a) (((x)+(a)-1)&~((a)-1))
 
@@ -1184,6 +1175,17 @@ static inline unsigned long _kc_msleep_interruptible(unsigned int msecs)
 
 /* Basic mode control register. */
 #define BMCR_SPEED1000		0x0040  /* MSB of Speed (1000)         */
+
+#ifdef pci_dma_mapping_error
+#undef pci_dma_mapping_error
+#endif
+#define pci_dma_mapping_error _kc_pci_dma_mapping_error
+static inline int _kc_pci_dma_mapping_error(struct pci_dev *pdev,
+                                            dma_addr_t dma_addr)
+{
+	return dma_addr == 0;
+}
+
 #endif /* < 2.6.9 */
 
 /*****************************************************************************/
@@ -1376,7 +1378,13 @@ static inline int _kc_skb_is_gso(const struct sk_buff *skb)
 #ifndef RHEL_RELEASE_VERSION
 #define RHEL_RELEASE_VERSION(a,b) 0
 #endif
-#if (!(( RHEL_RELEASE_CODE > RHEL_RELEASE_VERSION(4,4) ) && ( RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(5,0) ) || ( RHEL_RELEASE_CODE > RHEL_RELEASE_VERSION(5,0) ))) 
+#ifndef AX_RELEASE_CODE
+#define AX_RELEASE_CODE 0
+#endif
+#ifndef AX_RELEASE_VERSION
+#define AX_RELEASE_VERSION(a,b) 0
+#endif
+#if (!(( RHEL_RELEASE_CODE > RHEL_RELEASE_VERSION(4,4) ) && ( RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(5,0) ) || ( RHEL_RELEASE_CODE > RHEL_RELEASE_VERSION(5,0) ) || (AX_RELEASE_CODE > AX_RELEASE_VERSION(3,0))))
 typedef irqreturn_t (*irq_handler_t)(int, void*, struct pt_regs *);
 #endif
 typedef irqreturn_t (*new_handler_t)(int, void*);
@@ -1600,6 +1608,13 @@ extern int __kc_adapter_clean(struct net_device *, int *);
 /*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,26) )
 #endif /* < 2.6.26 */
+
+/*****************************************************************************/
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,27) )
+#ifndef pci_dma_mapping_error
+#define pci_dma_mapping_error(pdev, dma_addr) pci_dma_mapping_error(dma_addr)
+#endif
+#endif /* < 2.6.27 */
 
 #ifndef NETIF_F_MULTI_QUEUE
 #define NETIF_F_MULTI_QUEUE 0
