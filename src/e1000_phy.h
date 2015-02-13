@@ -51,7 +51,7 @@ void e1000e_phy_force_speed_duplex_setup(struct e1000_hw *hw, u16 *phy_ctrl);
 s32  e1000e_phy_hw_reset_generic(struct e1000_hw *hw);
 s32  e1000e_phy_reset_dsp(struct e1000_hw *hw);
 s32  e1000e_read_kmrn_reg(struct e1000_hw *hw, u32 offset, u16 *data);
-s32  e1000_read_kmrn_reg_locked(struct e1000_hw *hw, u32 offset, u16 *data);
+s32  e1000e_read_kmrn_reg_locked(struct e1000_hw *hw, u32 offset, u16 *data);
 s32  e1000e_read_phy_reg_igp(struct e1000_hw *hw, u32 offset, u16 *data);
 s32  e1000e_read_phy_reg_igp_locked(struct e1000_hw *hw, u32 offset, u16 *data);
 s32  e1000e_read_phy_reg_m88(struct e1000_hw *hw, u32 offset, u16 *data);
@@ -59,7 +59,7 @@ s32  e1000e_set_d3_lplu_state(struct e1000_hw *hw, bool active);
 s32  e1000e_setup_copper_link(struct e1000_hw *hw);
 s32  e1000_wait_autoneg(struct e1000_hw *hw);
 s32  e1000e_write_kmrn_reg(struct e1000_hw *hw, u32 offset, u16 data);
-s32  e1000_write_kmrn_reg_locked(struct e1000_hw *hw, u32 offset, u16 data);
+s32  e1000e_write_kmrn_reg_locked(struct e1000_hw *hw, u32 offset, u16 data);
 s32  e1000e_write_phy_reg_igp(struct e1000_hw *hw, u32 offset, u16 data);
 s32  e1000e_write_phy_reg_igp_locked(struct e1000_hw *hw, u32 offset, u16 data);
 s32  e1000e_write_phy_reg_m88(struct e1000_hw *hw, u32 offset, u16 data);
@@ -134,7 +134,6 @@ s32  e1000_get_cable_length_82577(struct e1000_hw *hw);
 #define I82577_CFG_ASSERT_CRS_ON_TX       (1 << 15)
 #define I82577_CFG_ENABLE_DOWNSHIFT       (3 << 10) /* auto downshift 100/10 */
 #define I82577_CTRL_REG                   23
-#define I82577_CTRL_DOWNSHIFT_MASK        (7 << 10)
 
 /* 82577 specific PHY registers */
 #define I82577_PHY_CTRL_2            18

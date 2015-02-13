@@ -65,8 +65,10 @@
 	10cc  82567LM-2 Gigabit Network Connection
 	10cd  82567LF-2 Gigabit Network Connection
 	10ce  82567V-2 Gigabit Network Connection
+#ifdef HARTWELL_HW
 	10d3  82574L Gigabit Network Connection
 		8086 a01f  Gigabit CT Desktop Adapter
+#endif /* HARTWELL_HW */
 	10d5  82571PT Gigabit PT Quad Port Server ExpressModule
 	10d9  82571EB Dual Port Gigabit Mezzanine Adapter
 	10da  82571EB Quad Port Gigabit Mezzanine Adapter
@@ -78,6 +80,9 @@
 	10ef  82578DM Gigabit Network Connection
 	10f0  82578DC Gigabit Network Connection
 	10f5  82567LM Gigabit Network Connection
+#ifdef HARTWELL_HW
 	10f6  82574L Gigabit Network Connection
+#endif /* HARTWELL_HW */
+	1501  82567V-3 Gigabit Network Connection
 	150c  82583V Gigabit Network Connection
 	294c  82566DC-2 Gigabit Network Connection

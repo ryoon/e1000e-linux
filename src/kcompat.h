@@ -198,6 +198,10 @@ struct msix_entry {
 #define NETIF_F_SCTP_CSUM 0
 #endif
 
+#ifndef IPPROTO_SCTP
+#define IPPROTO_SCTP 132
+#endif
+
 #ifndef CHECKSUM_PARTIAL
 #define CHECKSUM_PARTIAL CHECKSUM_HW
 #define CHECKSUM_COMPLETE CHECKSUM_HW
@@ -254,6 +258,11 @@ enum {
 #ifndef num_online_cpus
 #define num_online_cpus() smp_num_cpus
 #endif
+
+#ifndef numa_node_id
+#define numa_node_id() 0
+#endif
+
 
 #ifndef _LINUX_RANDOM_H
 #include <linux/random.h>
@@ -858,9 +867,6 @@ static inline void _kc_netif_poll_disable(struct net_device *netdev)
 	}
 }
 #endif
-#ifndef IPPROTO_SCTP
-#define IPPROTO_SCTP 132
-#endif
 #ifndef netif_poll_enable
 #define netif_poll_enable(x) _kc_netif_poll_enable(x)
 static inline void _kc_netif_poll_enable(struct net_device *netdev)
@@ -931,6 +937,8 @@ static inline u32 _kc_netif_msg_init(int debug_value, int default_msg_enable_bit
 
 #define dev_err(__unused_dev, format, arg...)            \
 	printk(KERN_ERR "%s: " format, pci_name(adapter->pdev) , ## arg)
+#define dev_info(__unused_dev, format, arg...)            \
+	printk(KERN_INFO "%s: " format, pci_name(pdev) , ## arg)
 #define dev_warn(__unused_dev, format, arg...)            \
 	printk(KERN_WARNING "%s: " format, pci_name(pdev) , ## arg)
 
@@ -1106,6 +1114,8 @@ static inline void _kc_random_ether_addr(u8 *addr)
         addr[0] &= 0xfe; /* clear multicast */
         addr[0] |= 0x02; /* set local assignment */
 } 
+#define page_to_nid() 0
+
 #endif /* < 2.6.6 */
 
 /*****************************************************************************/
@@ -1299,6 +1309,12 @@ extern void *_kc_kzalloc(size_t size, int flags);
 
 /*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,15) )
+#define setup_timer(_timer, _function, _data) \
+do { \
+	(_timer)->function = _function; \
+	(_timer)->data = _data; \
+	init_timer(_timer); \
+} while (0)
 #ifndef device_can_wakeup
 #define device_can_wakeup(dev)	(1)
 #endif
@@ -1346,6 +1362,10 @@ extern void *_kc_kzalloc(size_t size, int flags);
 
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+#endif
+
+#ifndef FIELD_SIZEOF
+#define FIELD_SIZEOF(t, f) (sizeof(((t*)0)->f))
 #endif
 
 #ifndef netdev_alloc_skb
@@ -1520,6 +1540,7 @@ static inline struct udphdr *_udp_hdr(const struct sk_buff *skb)
 #endif
 #else /* 2.6.22 */
 #define ETH_TYPE_TRANS_SETS_DEV
+#define HAVE_NETDEV_STATS_IN_NETDEV
 #endif /* < 2.6.22 */
 
 /*****************************************************************************/
@@ -1593,6 +1614,7 @@ extern int __kc_adapter_clean(struct net_device *, int *);
 #define __netif_subqueue_stopped(_a, _b) netif_subqueue_stopped(_a, _b)
 #define DMA_BIT_MASK(n)	(((n) == 64) ? ~0ULL : ((1ULL<<(n))-1))
 #else /* < 2.6.24 */
+#define HAVE_ETHTOOL_GET_SSET_COUNT
 #define HAVE_NETDEV_NAPI_LIST
 #endif /* < 2.6.24 */
 
@@ -1718,6 +1740,7 @@ extern void _kc_netif_tx_start_all_queues(struct net_device *);
 #define pci_prepare_to_sleep _kc_pci_prepare_to_sleep
 extern int _kc_pci_wake_from_d3(struct pci_dev *dev, bool enable);
 extern int _kc_pci_prepare_to_sleep(struct pci_dev *dev);
+#define netdev_alloc_page(a) alloc_page(GFP_ATOMIC)
 #endif /* < 2.6.28 */
 
 /*****************************************************************************/
@@ -1754,4 +1777,26 @@ extern u16 _kc_skb_tx_hash(struct net_device *dev, struct sk_buff *skb);
 #define HAVE_NETDEV_HW_ADDR
 #endif
 #endif /* < 2.6.31 */
+
+/*****************************************************************************/
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,32) )
+#undef netdev_tx_t
+#define netdev_tx_t int
+#if defined(CONFIG_FCOE) || defined(CONFIG_FCOE_MODULE)
+#ifndef NETIF_F_FCOE_MTU
+#define NETIF_F_FCOE_MTU       (1 << 26)
+#endif
+#endif /* CONFIG_FCOE || CONFIG_FCOE_MODULE */
+#else
+#if defined(CONFIG_FCOE) || defined(CONFIG_FCOE_MODULE)
+#ifndef HAVE_NETDEV_OPS_FCOE_ENABLE
+#define HAVE_NETDEV_OPS_FCOE_ENABLE
+#endif
+#endif /* CONFIG_FCOE || CONFIG_FCOE_MODULE */
+#ifdef CONFIG_DCB
+#ifndef HAVE_DCBNL_OPS_GETAPP
+#define HAVE_DCBNL_OPS_GETAPP
+#endif
+#endif /* CONFIG_DCB */
+#endif /* < 2.6.32 */
 #endif /* _KCOMPAT_H_ */

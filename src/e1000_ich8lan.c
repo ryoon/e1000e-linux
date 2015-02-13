@@ -629,7 +629,6 @@ static s32 e1000_acquire_swflag_ich8lan(struct e1000_hw *hw)
 		goto out;
 	}
 
-	/* In some cases, hardware will take up to 400ms to set the SW flag. */
 	timeout = SW_FLAG_TIMEOUT;
 
 	extcnf_ctrl |= E1000_EXTCNF_CTRL_SWFLAG;
@@ -721,7 +720,6 @@ static s32 e1000_check_reset_block_ich8lan(struct e1000_hw *hw)
  **/
 static s32 e1000_sw_lcd_config_ich8lan(struct e1000_hw *hw)
 {
-	struct e1000_dev_spec_ich8lan *dev_spec = &hw->dev_spec.ich8lan;
 	struct e1000_phy_info *phy = &hw->phy;
 	u32 i, data, cnf_size, cnf_base_addr, sw_cfg_mask;
 	s32 ret_val;
@@ -773,7 +771,7 @@ static s32 e1000_sw_lcd_config_ich8lan(struct e1000_hw *hw)
 		cnf_base_addr >>= E1000_EXTCNF_CTRL_EXT_CNF_POINTER_SHIFT;
 
 		if (!(data & E1000_EXTCNF_CTRL_OEM_WRITE_ENABLE) &&
-			hw->mac.type == e1000_pchlan) {
+		    (hw->mac.type == e1000_pchlan)) {
 			/*
 			 * HW configures the SMBus address and LEDs when the
 			 * OEM and LCD Write Enable bits are set in the NVM.
@@ -795,9 +793,8 @@ static s32 e1000_sw_lcd_config_ich8lan(struct e1000_hw *hw)
 			                                        (u16)data);
 			if (ret_val)
 				goto out;
-
-			dev_spec->nvm_lcd_config_enabled = true;
 		}
+
 		/* Configure LCD from extended configuration region. */
 
 		/* cnf_base_addr is in DWORD */
@@ -819,18 +816,8 @@ static s32 e1000_sw_lcd_config_ich8lan(struct e1000_hw *hw)
 				phy_page = reg_data;
 				continue;
 			}
-			/*
-			 * Bit 5 in the LCD config word contains the phy
-			 * address for PCH
-			 */
-			if (hw->mac.type == e1000_pchlan) {
-				phy->addr = 1;
-				if (reg_addr & LCD_CFG_PHY_ADDR_BIT) {
-					phy->addr = 2;
-					reg_addr &= PHY_REG_MASK;
-				}
-			}
 
+			reg_addr &= PHY_REG_MASK;
 			reg_addr |= phy_page;
 
 			ret_val = phy->ops.write_reg_locked(hw, (u32)reg_addr,
@@ -838,9 +825,6 @@ static s32 e1000_sw_lcd_config_ich8lan(struct e1000_hw *hw)
 			if (ret_val)
 				goto out;
 		}
-
-		if (hw->mac.type == e1000_pchlan)
-			dev_spec->nvm_lcd_config_enabled = false;
 	}
 
 out:
@@ -946,7 +930,7 @@ s32 e1000_configure_k1_ich8lan(struct e1000_hw *hw, bool k1_enable)
 	u32 reg = 0;
 	u16 kmrn_reg = 0;
 
-	ret_val = e1000_read_kmrn_reg_locked(hw,
+	ret_val = e1000e_read_kmrn_reg_locked(hw,
 	                                     E1000_KMRNCTRLSTA_K1_CONFIG,
 	                                     &kmrn_reg);
 	if (ret_val)
@@ -957,7 +941,7 @@ s32 e1000_configure_k1_ich8lan(struct e1000_hw *hw, bool k1_enable)
 	else
 		kmrn_reg &= ~E1000_KMRNCTRLSTA_K1_ENABLE;
 
-	ret_val = e1000_write_kmrn_reg_locked(hw,
+	ret_val = e1000e_write_kmrn_reg_locked(hw,
 	                                      E1000_KMRNCTRLSTA_K1_CONFIG,
 	                                      kmrn_reg);
 	if (ret_val)
@@ -1035,7 +1019,8 @@ s32 e1000_oem_bits_config_ich8lan(struct e1000_hw *hw, bool d0_state)
 			oem_reg |= HV_OEM_BITS_LPLU;
 	}
 	/* Restart auto-neg to activate the bits */
-	oem_reg |= HV_OEM_BITS_RESTART_AN;
+	if (!e1000_check_reset_block(hw))
+		oem_reg |= HV_OEM_BITS_RESTART_AN;
 	ret_val = hw->phy.ops.write_reg_locked(hw, HV_OEM_BITS, oem_reg);
 
 out:
@@ -3126,6 +3111,7 @@ void e1000e_disable_gig_wol_ich8lan(struct e1000_hw *hw)
 	u32 phy_ctrl;
 
 	switch (hw->mac.type) {
+	case e1000_ich8lan:
 	case e1000_ich9lan:
 	case e1000_ich10lan:
 	case e1000_pchlan:

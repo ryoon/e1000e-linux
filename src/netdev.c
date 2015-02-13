@@ -56,7 +56,7 @@
 #define DRV_EXTRAVERSION 
 #endif
 
-#define DRV_VERSION "1.0.15" DRV_EXTRAVERSION
+#define DRV_VERSION "1.1.2" DRV_EXTRAVERSION
 char e1000e_driver_name[] = "e1000e";
 const char e1000e_driver_version[] = DRV_VERSION;
 
@@ -350,8 +350,8 @@ static void e1000_receive_skb(struct e1000_adapter *adapter,
 #ifdef CONFIG_E1000E_NAPI
 #ifdef NETIF_F_HW_VLAN_TX
 	if (adapter->vlgrp && (status & E1000_RXD_STAT_VP))
-		vlan_hwaccel_receive_skb(skb, adapter->vlgrp,
-					 le16_to_cpu(vlan));
+		vlan_gro_receive(&adapter->napi, adapter->vlgrp,
+				 le16_to_cpu(vlan), skb);
 	else
 #endif
 #ifdef NETIF_F_GRO
@@ -531,6 +531,8 @@ static void e1000_alloc_rx_buffers_ps(struct e1000_adapter *adapter,
 					adapter->alloc_rx_buff_failed++;
 					goto no_buffers;
 				}
+			}
+			if (!ps_page->dma) {
 				ps_page->dma = pci_map_page(pdev,
 						   ps_page->page,
 						   0, PAGE_SIZE,
@@ -538,6 +540,7 @@ static void e1000_alloc_rx_buffers_ps(struct e1000_adapter *adapter,
 				if (pci_dma_mapping_error(pdev, ps_page->dma)) {
 					dev_err(&adapter->pdev->dev,
 					  "RX DMA page map failed\n");
+					ps_page->dma = 0;
 					adapter->rx_dma_failed++;
 					goto no_buffers;
 				}
@@ -549,6 +552,12 @@ static void e1000_alloc_rx_buffers_ps(struct e1000_adapter *adapter,
 			 */
 			rx_desc->read.buffer_addr[j+1] =
 			     cpu_to_le64(ps_page->dma);
+		}
+
+		skb = buffer_info->skb;
+		if (skb) {
+			skb_trim(skb, 0);
+			goto map_skb;
 		}
 
 		skb = netdev_alloc_skb(netdev,
@@ -567,6 +576,8 @@ static void e1000_alloc_rx_buffers_ps(struct e1000_adapter *adapter,
 		skb_reserve(skb, NET_IP_ALIGN);
 
 		buffer_info->skb = skb;
+
+map_skb:
 		buffer_info->dma = pci_map_single(pdev, skb->data,
 						  adapter->rx_ps_bsize0,
 						  PCI_DMA_FROMDEVICE);
@@ -2746,8 +2757,6 @@ static void e1000_configure_tx(struct e1000_adapter *adapter)
 		ew32(TARC(1), tarc);
 	}
 
-	e1000e_config_collision_dist(hw);
-
 	/* Setup Transmit Descriptor Settings for eop descriptor */
 	adapter->txd_cmd = E1000_TXD_CMD_EOP | E1000_TXD_CMD_IFCS;
 
@@ -2759,6 +2768,8 @@ static void e1000_configure_tx(struct e1000_adapter *adapter)
 	adapter->txd_cmd |= E1000_TXD_CMD_RS;
 
 	ew32(TCTL, tctl);
+
+	e1000e_config_collision_dist(hw);
 
 	adapter->tx_queue_len = adapter->netdev->tx_queue_len;
 }
@@ -2798,7 +2809,7 @@ static void e1000_setup_rctl(struct e1000_adapter *adapter)
 	if (adapter->flags2 & FLAG2_CRC_STRIPPING)
 		rctl |= E1000_RCTL_SECRC;
 
-	/* Workaround Si errata on 82577 PHY */
+	/* Workaround Si errata on 82577 PHY - configure IPG for jumbos */
 	if ((hw->phy.type == e1000_phy_82577) && (rctl & E1000_RCTL_LPE)) {
 		u16 phy_data;
 
@@ -4434,6 +4445,7 @@ static int e1000_tx_map(struct e1000_adapter *adapter,
 			unsigned int mss)
 {
 	struct e1000_ring *tx_ring = adapter->tx_ring;
+	struct pci_dev *pdev = adapter->pdev;
 	struct e1000_buffer *buffer_info;
 	unsigned int len = skb->len - skb->data_len;
 	unsigned int offset = 0, size, count = 0, i;
@@ -4449,15 +4461,13 @@ static int e1000_tx_map(struct e1000_adapter *adapter,
 		/* set time_stamp *before* dma to help avoid a possible race */
 		buffer_info->time_stamp = jiffies;
 		buffer_info->dma =
-			pci_map_single(adapter->pdev,
+			pci_map_single(pdev,
 				skb->data + offset,
 				size,
 				PCI_DMA_TODEVICE);
-		if (pci_dma_mapping_error(adapter->pdev, buffer_info->dma)) {
-			dev_err(&adapter->pdev->dev, "TX DMA map failed\n");
-			adapter->tx_dma_failed++;
-			return -1;
-		}
+		if (pci_dma_mapping_error(pdev, buffer_info->dma))
+			goto dma_mapping_error;
+
 		buffer_info->next_to_watch = i;
 
 		len -= size;
@@ -4482,18 +4492,13 @@ static int e1000_tx_map(struct e1000_adapter *adapter,
 			buffer_info->length = size;
 			buffer_info->time_stamp = jiffies;
 			buffer_info->dma =
-				pci_map_page(adapter->pdev,
+				pci_map_page(pdev,
 					frag->page,
 					offset,
 					size,
 					PCI_DMA_TODEVICE);
-			if (pci_dma_mapping_error(adapter->pdev,
-						  buffer_info->dma)) {
-				dev_err(&adapter->pdev->dev,
-					"TX DMA page map failed\n");
-				adapter->tx_dma_failed++;
-				return -1;
-			}
+			if (pci_dma_mapping_error(pdev, buffer_info->dma))
+				goto dma_mapping_error;
 
 			buffer_info->next_to_watch = i;
 
@@ -4514,6 +4519,23 @@ static int e1000_tx_map(struct e1000_adapter *adapter,
 
 	tx_ring->buffer_info[i].skb = skb;
 	tx_ring->buffer_info[first].next_to_watch = i;
+
+	return count;
+
+dma_mapping_error:
+
+	dev_err(&pdev->dev, "TX DMA map failed\n");
+	buffer_info->dma = 0;
+	count--;
+
+	while (count >=0) {
+		count--;
+		i--;
+		if (i < 0)
+			i+= tx_ring->count;
+		buffer_info = &tx_ring->buffer_info[i];
+		e1000_put_txbuf(adapter, buffer_info);;
+	}
 
 	return count;
 }
@@ -4656,7 +4678,8 @@ static int e1000_maybe_stop_tx(struct net_device *netdev, int size)
 }
 
 #define TXD_USE_COUNT(S, X) (((S) >> (X)) + 1)
-static int e1000_xmit_frame(struct sk_buff *skb, struct net_device *netdev)
+static netdev_tx_t e1000_xmit_frame(struct sk_buff *skb,
+                                    struct net_device *netdev)
 {
 	struct e1000_adapter *adapter = netdev_priv(netdev);
 	struct e1000_ring *tx_ring = adapter->tx_ring;
@@ -4779,6 +4802,7 @@ static int e1000_xmit_frame(struct sk_buff *skb, struct net_device *netdev)
 	if (count < 0) {
 		/* handle pci_map_single() error in e1000_tx_map */
 		dev_kfree_skb_any(skb);
+		tx_ring->next_to_use = first;
 		return NETDEV_TX_OK;
 	}
 
@@ -4922,8 +4946,8 @@ static int e1000_mii_ioctl(struct net_device *netdev, struct ifreq *ifr,
 		data->phy_id = adapter->hw.phy.addr;
 		break;
 	case SIOCGMIIREG:
-		if (!capable(CAP_NET_ADMIN))
-			return -EPERM;
+		e1000_phy_read_status(adapter);
+
 		switch (data->reg_num & 0x1F) {
 		case MII_BMCR:
 			data->val_out = adapter->phy_regs.bmcr;
@@ -5948,16 +5972,16 @@ static void __devexit e1000_remove(struct pci_dev *pdev)
 	cancel_work_sync(&adapter->print_hang_task);
 	flush_scheduled_work();
 
+	if (!(netdev->flags & IFF_UP))
+		e1000_power_down_phy(adapter);
+
+	unregister_netdev(netdev);
+
 	/*
 	 * Release control of h/w to f/w.  If f/w is AMT enabled, this
 	 * would have already happened in close and is redundant.
 	 */
 	e1000_release_hw_control(adapter);
-
-	unregister_netdev(netdev);
-
-	if (!e1000_check_reset_block(&adapter->hw))
-		e1000_phy_hw_reset(&adapter->hw);
 
 #ifdef CONFIG_E1000E_MSIX
 	e1000e_reset_interrupt_capability(adapter);
@@ -6028,6 +6052,7 @@ static struct pci_device_id e1000e_pci_tbl[] = {
 	{ PCI_VDEVICE(INTEL, E1000_DEV_ID_ICH8_IGP_C), board_ich8lan },
 	{ PCI_VDEVICE(INTEL, E1000_DEV_ID_ICH8_IGP_M), board_ich8lan },
 	{ PCI_VDEVICE(INTEL, E1000_DEV_ID_ICH8_IGP_M_AMT), board_ich8lan },
+	{ PCI_VDEVICE(INTEL, E1000_DEV_ID_ICH8_82567V_3), board_ich8lan },
 
 	{ PCI_VDEVICE(INTEL, E1000_DEV_ID_ICH9_IFE), board_ich9lan },
 	{ PCI_VDEVICE(INTEL, E1000_DEV_ID_ICH9_IFE_G), board_ich9lan },

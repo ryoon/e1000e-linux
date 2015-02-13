@@ -57,6 +57,7 @@ struct e1000_hw;
 #define E1000_DEV_ID_80003ES2LAN_SERDES_DPT   0x1098
 #define E1000_DEV_ID_80003ES2LAN_COPPER_SPT   0x10BA
 #define E1000_DEV_ID_80003ES2LAN_SERDES_SPT   0x10BB
+#define E1000_DEV_ID_ICH8_82567V_3            0x1501
 #define E1000_DEV_ID_ICH8_IGP_M_AMT           0x1049
 #define E1000_DEV_ID_ICH8_IGP_AMT             0x104A
 #define E1000_DEV_ID_ICH8_IGP_C               0x104B
@@ -670,7 +671,6 @@ struct e1000_dev_spec_ich8lan {
 	bool kmrn_lock_loss_workaround_enabled;
 	struct e1000_shadow_ram shadow_ram[E1000_ICH8_SHADOW_RAM_WORDS];
 	bool nvm_k1_enabled;
-	bool nvm_lcd_config_enabled;
 };
 
 struct e1000_hw {

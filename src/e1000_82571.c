@@ -341,6 +341,7 @@ static s32 e1000_init_mac_params_82571(struct e1000_hw *hw)
 		mac->ops.check_mng_mode = e1000_check_mng_mode_generic;
 		break;
 	}
+
 	/* multicast address update */
 	mac->ops.update_mc_addr_list = e1000e_update_mc_addr_list_generic;
 	/* writing VFTA */
@@ -487,7 +488,6 @@ static s32 e1000_get_phy_id_82571(struct e1000_hw *hw)
 		ret_val = -E1000_ERR_PHY;
 		break;
 	}
-
 out:
 	return ret_val;
 }
@@ -1203,7 +1203,6 @@ static void e1000_initialize_hw_bits_82571(struct e1000_hw *hw)
 	default:
 		break;
 	}
-
 	return;
 }
 

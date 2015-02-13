@@ -778,7 +778,7 @@ static s32 e1000_get_cable_length_80003es2lan(struct e1000_hw *hw)
 	index = phy_data & GG82563_DSPD_CABLE_LENGTH;
 
 	if (index >= GG82563_CABLE_LENGTH_TABLE_SIZE - 5) {
-		ret_val = E1000_ERR_PHY;
+		ret_val = -E1000_ERR_PHY;
 		goto out;
 	}
 

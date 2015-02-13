@@ -28,8 +28,8 @@
 
 #include "e1000.h"
 
-static s32 e1000_phy_setup_autoneg(struct e1000_hw *hw);
 static s32 e1000_copper_link_autoneg(struct e1000_hw *hw);
+static s32 e1000_phy_setup_autoneg(struct e1000_hw *hw);
 static u32 e1000_get_phy_addr_for_bm_page(u32 page, u32 reg);
 static s32 e1000_access_phy_wakeup_reg_bm(struct e1000_hw *hw, u32 offset,
                                           u16 *data, bool read);
@@ -525,7 +525,7 @@ s32 e1000e_read_kmrn_reg(struct e1000_hw *hw, u32 offset, u16 *data)
 }
 
 /**
- *  e1000_read_kmrn_reg_locked -  Read kumeran register
+ *  e1000e_read_kmrn_reg_locked -  Read kumeran register
  *  @hw: pointer to the HW structure
  *  @offset: register offset to be read
  *  @data: pointer to the read data
@@ -534,7 +534,7 @@ s32 e1000e_read_kmrn_reg(struct e1000_hw *hw, u32 offset, u16 *data)
  *  information retrieved is stored in data.
  *  Assumes semaphore already acquired.
  **/
-s32 e1000_read_kmrn_reg_locked(struct e1000_hw *hw, u32 offset, u16 *data)
+s32 e1000e_read_kmrn_reg_locked(struct e1000_hw *hw, u32 offset, u16 *data)
 {
 	return __e1000_read_kmrn_reg(hw, offset, data, true);
 }
@@ -593,7 +593,7 @@ s32 e1000e_write_kmrn_reg(struct e1000_hw *hw, u32 offset, u16 data)
 }
 
 /**
- *  e1000_write_kmrn_reg_locked -  Write kumeran register
+ *  e1000e_write_kmrn_reg_locked -  Write kumeran register
  *  @hw: pointer to the HW structure
  *  @offset: register offset to write to
  *  @data: data to write at register offset
@@ -601,7 +601,7 @@ s32 e1000e_write_kmrn_reg(struct e1000_hw *hw, u32 offset, u16 data)
  *  Write the data to PHY register at the offset using the kumeran interface.
  *  Assumes semaphore already acquired.
  **/
-s32 e1000_write_kmrn_reg_locked(struct e1000_hw *hw, u32 offset, u16 data)
+s32 e1000e_write_kmrn_reg_locked(struct e1000_hw *hw, u32 offset, u16 data)
 {
 	return __e1000_write_kmrn_reg(hw, offset, data, true);
 }
@@ -634,15 +634,6 @@ s32 e1000_copper_link_setup_82577(struct e1000_hw *hw)
 	phy_data |= I82577_CFG_ENABLE_DOWNSHIFT;
 
 	ret_val = e1e_wphy(hw, I82577_CFG_REG, phy_data);
-	if (ret_val)
-		goto out;
-
-	/* Set number of link attempts before downshift */
-	ret_val = e1e_rphy(hw, I82577_CTRL_REG, &phy_data);
-	if (ret_val)
-		goto out;
-	phy_data &= ~I82577_CTRL_DOWNSHIFT_MASK;
-	ret_val = e1e_wphy(hw, I82577_CTRL_REG, phy_data);
 
 out:
 	return ret_val;
@@ -1878,7 +1869,7 @@ s32 e1000e_get_cable_length_m88(struct e1000_hw *hw)
 	index = (phy_data & M88E1000_PSSR_CABLE_LENGTH) >>
 	        M88E1000_PSSR_CABLE_LENGTH_SHIFT;
 	if (index >= M88E1000_CABLE_LENGTH_TABLE_SIZE - 1) {
-		ret_val = E1000_ERR_PHY;
+		ret_val = -E1000_ERR_PHY;
 		goto out;
 	}
 
@@ -1980,7 +1971,7 @@ s32 e1000e_get_phy_info_m88(struct e1000_hw *hw)
 	u16 phy_data;
 	bool link;
 
-	if (hw->phy.media_type != e1000_media_type_copper) {
+	if (phy->media_type != e1000_media_type_copper) {
 		e_dbg("Phy info is only valid for copper media\n");
 		ret_val = -E1000_ERR_CONFIG;
 		goto out;
@@ -2080,7 +2071,7 @@ s32 e1000e_get_phy_info_igp(struct e1000_hw *hw)
 
 	if ((data & IGP01E1000_PSSR_SPEED_MASK) ==
 	    IGP01E1000_PSSR_SPEED_1000MBPS) {
-		ret_val = e1000_get_cable_length(hw);
+		ret_val = phy->ops.get_cable_length(hw);
 		if (ret_val)
 			goto out;
 
@@ -2589,6 +2580,7 @@ out:
 	return ret_val;
 }
 
+
 /**
  *  e1000_access_phy_wakeup_reg_bm - Read BM PHY wakeup register
  *  @hw: pointer to the HW structure
@@ -2826,6 +2818,9 @@ static s32 __e1000_read_phy_reg_hv(struct e1000_hw *hw, u32 offset, u16 *data,
 					     IGP01E1000_PHY_PAGE_SELECT,
 					     (page << IGP_PAGE_SHIFT));
 		hw->phy.addr = phy_addr;
+
+		if (ret_val)
+			goto out;
 	}
 
 	ret_val = e1000e_read_phy_reg_mdic(hw, MAX_PHY_REG_ADDRESS & reg,
@@ -2833,7 +2828,7 @@ static s32 __e1000_read_phy_reg_hv(struct e1000_hw *hw, u32 offset, u16 *data,
 out:
 	/* Revert to MDIO fast mode, if applicable */
 	if ((hw->phy.type == e1000_phy_82577) && in_slow_mode)
-		ret_val = e1000_set_mdio_slow_mode_hv(hw, false);
+		ret_val |= e1000_set_mdio_slow_mode_hv(hw, false);
 
 	if (!locked)
 		hw->phy.ops.release(hw);
@@ -2887,7 +2882,6 @@ static s32 __e1000_write_phy_reg_hv(struct e1000_hw *hw, u32 offset, u16 data,
 	u16 page = BM_PHY_REG_PAGE(offset);
 	u16 reg = BM_PHY_REG_NUM(offset);
 	bool in_slow_mode = false;
-	struct e1000_dev_spec_ich8lan *dev_spec = &hw->dev_spec.ich8lan;
 
 	if (!locked) {
 		ret_val = hw->phy.ops.acquire(hw);
@@ -2918,9 +2912,7 @@ static s32 __e1000_write_phy_reg_hv(struct e1000_hw *hw, u32 offset, u16 data,
 		goto out;
 	}
 
-	/* The LCD Config workaround provides the phy address to use */
-	if (dev_spec->nvm_lcd_config_enabled == false)
-		hw->phy.addr = e1000_get_phy_addr_for_hv_page(page);
+	hw->phy.addr = e1000_get_phy_addr_for_hv_page(page);
 
 	if (page == HV_INTC_FC_PAGE_START)
 		page = 0;
@@ -2951,6 +2943,9 @@ static s32 __e1000_write_phy_reg_hv(struct e1000_hw *hw, u32 offset, u16 data,
 					     IGP01E1000_PHY_PAGE_SELECT,
 					     (page << IGP_PAGE_SHIFT));
 		hw->phy.addr = phy_addr;
+
+		if (ret_val)
+			goto out;
 	}
 
 	ret_val = e1000e_write_phy_reg_mdic(hw, MAX_PHY_REG_ADDRESS & reg,
@@ -2959,7 +2954,7 @@ static s32 __e1000_write_phy_reg_hv(struct e1000_hw *hw, u32 offset, u16 data,
 out:
 	/* Revert to MDIO fast mode, if applicable */
 	if ((hw->phy.type == e1000_phy_82577) && in_slow_mode)
-		ret_val = e1000_set_mdio_slow_mode_hv(hw, false);
+		ret_val |= e1000_set_mdio_slow_mode_hv(hw, false);
 
 	if (!locked)
 		hw->phy.ops.release(hw);
@@ -3291,7 +3286,7 @@ s32 e1000_get_cable_length_82577(struct e1000_hw *hw)
 	         I82577_DSTATUS_CABLE_LENGTH_SHIFT;
 
 	if (length == E1000_CABLE_LENGTH_UNDEFINED)
-		ret_val = E1000_ERR_PHY;
+		ret_val = -E1000_ERR_PHY;
 
 	phy->cable_length = length;
 
