@@ -375,14 +375,6 @@ void _kc_free_netdev(struct net_device *netdev)
 /*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,24) )
 #ifdef NAPI
-/* this function returns the true netdev of the napi struct */
-struct net_device * napi_to_netdev(struct napi_struct *napi)
-{
-	struct adapter_struct *adapter = container_of(napi,
-	                                              struct adapter_struct,
-	                                              napi);
-	return adapter->netdev;
-}
 
 int __kc_adapter_clean(struct net_device *netdev, int *budget)
 {

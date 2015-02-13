@@ -78,9 +78,13 @@ struct msix_entry {
 	u16 entry;  /* driver uses to specify entry, OS writes */
 };
 #endif
+#undef pci_enable_msi
 #define pci_enable_msi(a) -ENOTSUPP
+#undef pci_disable_msi
 #define pci_disable_msi(a) do {} while (0)
+#undef pci_enable_msix
 #define pci_enable_msix(a, b, c) -ENOTSUPP
+#undef pci_disable_msix
 #define pci_disable_msix(a) do {} while (0)
 #define msi_remove_pci_irq_vectors(a) do {} while (0)
 #endif /* CONFIG_PCI_MSI */
@@ -105,6 +109,8 @@ struct msix_entry {
 #if ( GCC_VERSION < 3000 )
 #define _Bool char
 #endif
+#else
+#define _Bool char
 #endif
 #ifndef bool
 #define bool _Bool
@@ -165,6 +171,12 @@ struct msix_entry {
 #define NETDEV_TX_LOCKED -1
 #endif
 
+#ifdef CONFIG_PCI_IOV
+#define VMDQ_P(p)   ((p) + adapter->num_vfs)
+#else
+#define VMDQ_P(p)   (p)
+#endif
+
 #ifndef SKB_DATAREF_SHIFT
 /* if we do not have the infrastructure to detect if skb_header is cloned
    just return false in all cases */
@@ -180,6 +192,10 @@ struct msix_entry {
 #define vlan_gro_receive(_napi, _vlgrp, _vlan, _skb) \
 		vlan_hwaccel_receive_skb(_skb, _vlgrp, _vlan)
 #define napi_gro_receive(_napi, _skb) netif_receive_skb(_skb)
+#endif
+
+#ifndef NETIF_F_SCTP_CSUM
+#define NETIF_F_SCTP_CSUM 0
 #endif
 
 #ifndef CHECKSUM_PARTIAL
@@ -265,7 +281,6 @@ enum {
 #ifndef DCA_GET_TAG_TWO_ARGS
 #define dca3_get_tag(a,b) dca_get_tag(b)
 #endif
-
 
 /*****************************************************************************/
 /* Installations with ethtool version without eeprom, adapter id, or statistics
@@ -782,6 +797,13 @@ extern void _kc_pci_unmap_page(struct pci_dev *dev, u64 dma_addr, size_t size, i
 #define cpu_relax()	rep_nop()
 #endif
 
+struct vlan_ethhdr {
+	unsigned char h_dest[ETH_ALEN];
+	unsigned char h_source[ETH_ALEN];
+	unsigned short h_vlan_proto;
+	unsigned short h_vlan_TCI;
+	unsigned short h_vlan_encapsulated_proto;
+};
 #endif /* 2.4.13 => 2.4.10 */
 
 /*****************************************************************************/
@@ -800,6 +822,7 @@ extern void _kc_pci_unmap_page(struct pci_dev *dev, u64 dma_addr, size_t size, i
 
 /* we won't support NAPI on less than 2.4.20 */
 #ifdef NAPI
+#undef NAPI
 #undef CONFIG_E1000E_NAPI
 #endif
 
@@ -835,7 +858,9 @@ static inline void _kc_netif_poll_disable(struct net_device *netdev)
 	}
 }
 #endif
-
+#ifndef IPPROTO_SCTP
+#define IPPROTO_SCTP 132
+#endif
 #ifndef netif_poll_enable
 #define netif_poll_enable(x) _kc_netif_poll_enable(x)
 static inline void _kc_netif_poll_enable(struct net_device *netdev)
@@ -866,9 +891,7 @@ static inline void _kc_netif_tx_disable(struct net_device *dev)
 /*****************************************************************************/
 /* 2.5.71 => 2.4.x */
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,5,71) )
-#include <net/sock.h>
 #define sk_protocol protocol
-
 #define pci_get_device pci_find_device
 #endif /* 2.5.70 => 2.4.x */
 
@@ -1076,6 +1099,13 @@ static inline void _kc_bitmap_zero(unsigned long *dst, int nbits)
                 memset(dst, 0, len);
         }
 }
+#define random_ether_addr _kc_random_ether_addr
+static inline void _kc_random_ether_addr(u8 *addr)
+{
+        get_random_bytes(addr, ETH_ALEN);
+        addr[0] &= 0xfe; /* clear multicast */
+        addr[0] |= 0x02; /* set local assignment */
+} 
 #endif /* < 2.6.6 */
 
 /*****************************************************************************/
@@ -1159,6 +1189,9 @@ static inline unsigned long _kc_msleep_interruptible(unsigned int msecs)
 #ifndef __le64
 #define __le64 u64
 #endif
+#ifndef __be16
+#define __be16 u16
+#endif
 
 #ifdef pci_dma_mapping_error
 #undef pci_dma_mapping_error
@@ -1169,7 +1202,6 @@ static inline int _kc_pci_dma_mapping_error(struct pci_dev *pdev,
 {
 	return dma_addr == 0;
 }
-
 #endif /* < 2.6.9 */
 
 /*****************************************************************************/
@@ -1280,6 +1312,7 @@ extern void *_kc_kzalloc(size_t size, int flags);
 
 /*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,16) )
+#undef DEFINE_MUTEX
 #define DEFINE_MUTEX(x)	DECLARE_MUTEX(x)
 #define mutex_lock(x)	down_interruptible(x)
 #define mutex_unlock(x)	up(x)
@@ -1485,6 +1518,8 @@ static inline struct udphdr *_udp_hdr(const struct sk_buff *skb)
 	return (struct udphdr *)skb_transport_header(skb);
 }
 #endif
+#else /* 2.6.22 */
+#define ETH_TYPE_TRANS_SETS_DEV
 #endif /* < 2.6.22 */
 
 /*****************************************************************************/
@@ -1501,19 +1536,22 @@ static inline struct udphdr *_udp_hdr(const struct sk_buff *skb)
 
 /*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,24) )
+/* if GRO is supported then the napi struct must already exist */
+#ifndef NETIF_F_GRO
 /* NAPI API changes in 2.6.24 break everything */
 struct napi_struct {
 	/* used to look up the real NAPI polling routine */
 	int (*poll)(struct napi_struct *, int);
-	struct net_device poll_dev;
+	struct net_device *dev;
 	int weight;
 };
+#endif
+
 #ifdef NAPI
 extern int __kc_adapter_clean(struct net_device *, int *);
-extern struct net_device * napi_to_netdev(struct napi_struct *);
-#define napi_to_poll_dev(napi) napi_to_netdev(napi)
-#define napi_enable(napi) netif_poll_enable(adapter->netdev)
-#define napi_disable(napi) netif_poll_disable(adapter->netdev)
+#define napi_to_poll_dev(_napi) (_napi)->dev
+#define napi_enable(_napi) netif_poll_enable((_napi)->dev)
+#define napi_disable(_napi) netif_poll_disable((_napi)->dev)
 #define netif_napi_add(_netdev, _napi, _poll, _weight) \
 	do { \
 		struct napi_struct *__napi = (_napi); \
@@ -1521,13 +1559,22 @@ extern struct net_device * napi_to_netdev(struct napi_struct *);
 		_netdev->weight = (_weight); \
 		__napi->poll = &(_poll); \
 		__napi->weight = (_weight); \
+		__napi->dev = (_netdev); \
 		netif_poll_disable(_netdev); \
 	} while (0)
 #define netif_napi_del(_a) do {} while (0)
-#define napi_schedule_prep(napi) netif_rx_schedule_prep(napi_to_netdev(napi))
-#define napi_schedule(napi) netif_rx_schedule(napi_to_poll_dev(napi))
-#define __napi_schedule(napi) __netif_rx_schedule(napi_to_poll_dev(napi))
-#define napi_complete(napi) netif_rx_complete(napi_to_poll_dev(napi))
+#define napi_schedule_prep(_napi) netif_rx_schedule_prep((_napi)->dev)
+#define napi_schedule(_napi) netif_rx_schedule(napi_to_poll_dev(_napi))
+#define __napi_schedule(_napi) __netif_rx_schedule(napi_to_poll_dev(_napi))
+#ifndef NETIF_F_GRO
+#define napi_complete(_napi) netif_rx_complete(napi_to_poll_dev(_napi))
+#else
+#define napi_complete(_napi) \
+	do { \
+		napi_gro_flush(_napi); \
+		netif_rx_complete(napi_to_poll_dev(_napi)); \
+	} while (0)
+#endif /* NETIF_F_GRO */
 #else /* NAPI */
 #define netif_napi_add(_netdev, _napi, _poll, _weight) \
 	do { \
@@ -1536,6 +1583,7 @@ extern struct net_device * napi_to_netdev(struct napi_struct *);
 		_netdev->weight = (_weight); \
 		__napi->poll = &(_poll); \
 		__napi->weight = (_weight); \
+		__napi->dev = (_netdev); \
 	} while (0)
 #define netif_napi_del(_a) do {} while (0)
 #endif /* NAPI */
@@ -1690,15 +1738,20 @@ extern int _kc_pci_prepare_to_sleep(struct pci_dev *dev);
 #endif /* IXGBE_FCOE */
 extern u16 _kc_skb_tx_hash(struct net_device *dev, struct sk_buff *skb);
 #define skb_tx_hash(n, s) _kc_skb_tx_hash(n, s)
+#define skb_record_rx_queue(a, b) do {} while (0)
 #else
 #define HAVE_ASPM_QUIRKS
 #endif /* < 2.6.30 */
 
 /*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,31) )
+#define ETH_P_1588 0x88F7
 #else
 #ifndef HAVE_NETDEV_STORAGE_ADDRESS
 #define HAVE_NETDEV_STORAGE_ADDRESS
+#endif
+#ifndef HAVE_NETDEV_HW_ADDR
+#define HAVE_NETDEV_HW_ADDR
 #endif
 #endif /* < 2.6.31 */
 #endif /* _KCOMPAT_H_ */

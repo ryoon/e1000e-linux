@@ -257,8 +257,7 @@ static int e1000_set_settings(struct net_device *netdev,
 		ecmd->advertising = hw->phy.autoneg_advertised;
 		if (adapter->fc_autoneg) {
 			if (hw->mac.type == e1000_pchlan) {
-				/* Workaround h/w hang when Tx flow control
-				 * enabled */
+				/* Workaround h/w hang when Tx fc enabled */
 				hw->fc.requested_mode = e1000_fc_rx_pause;
 			} else {
 				hw->fc.requested_mode = e1000_fc_default;
@@ -340,10 +339,18 @@ static int e1000_set_pauseparam(struct net_device *netdev,
 
 		hw->fc.current_mode = hw->fc.requested_mode;
 
-		retval = ((hw->phy.media_type == e1000_media_type_fiber) ?
-			  hw->mac.ops.setup_link(hw) : e1000e_force_mac_fc(hw));
+		if (hw->phy.media_type == e1000_media_type_fiber) {
+			retval = hw->mac.ops.setup_link(hw);
+			/* implicit goto out */
+		} else {
+			retval = e1000e_force_mac_fc(hw);
+			if (retval)
+				goto out;
+			e1000e_set_fc_watermarks(hw);
+		}
 	}
 
+out:
 	clear_bit(__E1000_RESETTING, &adapter->state);
 	return retval;
 }

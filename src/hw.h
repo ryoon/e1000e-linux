@@ -518,11 +518,13 @@ struct e1000_phy_operations {
 	s32  (*get_cable_length)(struct e1000_hw *);
 	s32  (*get_info)(struct e1000_hw *);
 	s32  (*read_reg)(struct e1000_hw *, u32, u16 *);
+	s32  (*read_reg_locked)(struct e1000_hw *, u32, u16 *);
 	void (*release)(struct e1000_hw *);
 	s32  (*reset)(struct e1000_hw *);
 	s32  (*set_d0_lplu_state)(struct e1000_hw *, bool);
 	s32  (*set_d3_lplu_state)(struct e1000_hw *, bool);
 	s32  (*write_reg)(struct e1000_hw *, u32, u16);
+	s32  (*write_reg_locked)(struct e1000_hw *, u32, u16);
 	void (*power_up)(struct e1000_hw *);
 	void (*power_down)(struct e1000_hw *);
 };
@@ -653,6 +655,10 @@ struct e1000_dev_spec_82571 {
 	u32 smb_counter;
 };
 
+struct e1000_dev_spec_80003es2lan {
+	bool  mdic_wa_enable;
+};
+
 struct e1000_shadow_ram {
 	u16  value;
 	bool modified;
@@ -663,6 +669,8 @@ struct e1000_shadow_ram {
 struct e1000_dev_spec_ich8lan {
 	bool kmrn_lock_loss_workaround_enabled;
 	struct e1000_shadow_ram shadow_ram[E1000_ICH8_SHADOW_RAM_WORDS];
+	bool nvm_k1_enabled;
+	bool nvm_lcd_config_enabled;
 };
 
 struct e1000_hw {
@@ -680,6 +688,7 @@ struct e1000_hw {
 
 	union {
 		struct e1000_dev_spec_82571	_82571;
+		struct e1000_dev_spec_80003es2lan _80003es2lan;
 		struct e1000_dev_spec_ich8lan	ich8lan;
 	} dev_spec;
 

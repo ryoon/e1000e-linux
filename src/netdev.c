@@ -44,7 +44,9 @@
 #endif
 #include <linux/mii.h>
 #include <linux/ethtool.h>
+#ifdef NETIF_F_HW_VLAN_TX
 #include <linux/if_vlan.h>
+#endif
 
 #include "e1000.h"
 
@@ -54,7 +56,7 @@
 #define DRV_EXTRAVERSION 
 #endif
 
-#define DRV_VERSION "1.0.2.5" DRV_EXTRAVERSION
+#define DRV_VERSION "1.0.15" DRV_EXTRAVERSION
 char e1000e_driver_name[] = "e1000e";
 const char e1000e_driver_version[] = DRV_VERSION;
 
@@ -295,6 +297,7 @@ static struct e1000_info e1000_pch_info = {
 				  | FLAG_HAS_AMT
 				  | FLAG_HAS_FLASH
 				  | FLAG_HAS_JUMBO_FRAMES
+				  | FLAG_DISABLE_FC_PAUSE_TIME /* errata */
 				  | FLAG_APME_IN_WUC,
 	.pba			= 26,
 	.max_hw_frame_size	= 4096,
@@ -345,19 +348,23 @@ static void e1000_receive_skb(struct e1000_adapter *adapter,
 	skb->protocol = eth_type_trans(skb, netdev);
 
 #ifdef CONFIG_E1000E_NAPI
+#ifdef NETIF_F_HW_VLAN_TX
 	if (adapter->vlgrp && (status & E1000_RXD_STAT_VP))
 		vlan_hwaccel_receive_skb(skb, adapter->vlgrp,
 					 le16_to_cpu(vlan));
 	else
+#endif
 #ifdef NETIF_F_GRO
 		napi_gro_receive(&adapter->napi, skb);
 #else
 		netif_receive_skb(skb);
 #endif /* NETIF_F_GRO */
 #else
+#ifdef NETIF_F_HW_VLAN_TX
 	if (adapter->vlgrp && (status & E1000_RXD_STAT_VP))
 		ret = vlan_hwaccel_rx(skb, adapter->vlgrp, le16_to_cpu(vlan));
 	else
+#endif
 		ret = netif_rx(skb);
 	if (unlikely(ret == NET_RX_DROP))
 		adapter->rx_dropped_backlog++;
@@ -847,15 +854,27 @@ static void e1000_put_txbuf(struct e1000_adapter *adapter,
 	}
 }
 
-static void e1000_print_tx_hang(struct e1000_adapter *adapter)
+static void e1000_print_hw_hang(struct work_struct *work)
 {
+	struct e1000_adapter *adapter = container_of(work,
+	                                             struct e1000_adapter,
+	                                             print_hang_task);
 	struct e1000_ring *tx_ring = adapter->tx_ring;
 	unsigned int i = tx_ring->next_to_clean;
 	unsigned int eop = tx_ring->buffer_info[i].next_to_watch;
 	struct e1000_tx_desc *eop_desc = E1000_TX_DESC(*tx_ring, eop);
+	struct e1000_hw *hw = &adapter->hw;
+	u16 phy_status, phy_1000t_status, phy_ext_status;
+	u16 pci_status;
+	
+	e1e_rphy(hw, PHY_STATUS, &phy_status);
+	e1e_rphy(hw, PHY_1000T_STATUS, &phy_1000t_status);
+	e1e_rphy(hw, PHY_EXT_STATUS, &phy_ext_status);
 
-	/* detected Tx unit hang */
-	e_err("Detected Tx Unit Hang:\n"
+	pci_read_config_word(adapter->pdev, PCI_STATUS, &pci_status);
+
+	/* detected Hardware unit hang */
+	e_err("Detected Hardware Unit Hang:\n"
 	      "  TDH                  <%x>\n"
 	      "  TDT                  <%x>\n"
 	      "  next_to_use          <%x>\n"
@@ -864,7 +883,12 @@ static void e1000_print_tx_hang(struct e1000_adapter *adapter)
 	      "  time_stamp           <%lx>\n"
 	      "  next_to_watch        <%x>\n"
 	      "  jiffies              <%lx>\n"
-	      "  next_to_watch.status <%x>\n",
+	      "  next_to_watch.status <%x>\n"
+	      "MAC Status             <%x>\n"
+	      "PHY Status             <%x>\n"
+	      "PHY 1000BASE-T Status  <%x>\n"
+	      "PHY Extended Status    <%x>\n"
+	      "PCI Status             <%x>\n",
 	      readl(adapter->hw.hw_addr + tx_ring->head),
 	      readl(adapter->hw.hw_addr + tx_ring->tail),
 	      tx_ring->next_to_use,
@@ -872,7 +896,16 @@ static void e1000_print_tx_hang(struct e1000_adapter *adapter)
 	      tx_ring->buffer_info[eop].time_stamp,
 	      eop,
 	      jiffies,
-	      eop_desc->upper.fields.status);
+	      eop_desc->upper.fields.status,
+	      er32(STATUS),
+	      phy_status,
+	      phy_1000t_status,
+	      phy_ext_status,
+	      pci_status);
+
+	/* Suggest workaround for known h/w issue */
+	if ((hw->mac.type == e1000_pchlan) && (er32(CTRL) & E1000_CTRL_TFCE))
+		e_err("Try turning off Tx pause (flow control) via ethtool\n");
 }
 
 /**
@@ -966,7 +999,7 @@ done_cleaning:
 		    time_after(jiffies, tx_ring->buffer_info[eop].time_stamp
 			       + (adapter->tx_timeout_factor * HZ))
 		    && !(er32(STATUS) & E1000_STATUS_TXOFF)) {
-			e1000_print_tx_hang(adapter);
+			schedule_work(&adapter->print_hang_task);
 			netif_stop_queue(netdev);
 		}
 	}
@@ -2452,6 +2485,7 @@ static int e1000_poll(struct napi_struct *napi, int budget)
 		work_done = budget;
 
 #ifndef HAVE_NETDEV_NAPI_LIST
+	/* if netdev is disabled we need to stop polling */
 	if (!netif_running(adapter->netdev))
 		work_done = 0;
 
@@ -2475,6 +2509,7 @@ static int e1000_poll(struct napi_struct *napi, int budget)
 }
 
 #endif /* CONFIG_E1000E_NAPI */
+#ifdef NETIF_F_HW_VLAN_TX
 static void e1000_vlan_rx_add_vid(struct net_device *netdev, u16 vid)
 {
 	struct e1000_adapter *adapter = netdev_priv(netdev);
@@ -2616,6 +2651,7 @@ static void e1000_restore_vlan(struct e1000_adapter *adapter)
 	}
 }
 
+#endif /* NETIF_F_HW_VLAN_TX */
 static void e1000_init_manageability(struct e1000_adapter *adapter)
 {
 	struct e1000_hw *hw = &adapter->hw;
@@ -3073,7 +3109,9 @@ static void e1000_configure(struct e1000_adapter *adapter)
 {
 	e1000_set_multi(adapter->netdev);
 
+#ifdef NETIF_F_HW_VLAN_TX
 	e1000_restore_vlan(adapter);
+#endif
 	e1000_init_manageability(adapter);
 
 	e1000_configure_tx(adapter);
@@ -3196,17 +3234,31 @@ void e1000e_reset(struct e1000_adapter *adapter)
 	 *   with ERT support assuming ERT set to E1000_ERT_2048), or
 	 * - the full Rx FIFO size minus two full frames
 	 */
-	if ((adapter->flags & FLAG_HAS_ERT) &&
-	    (adapter->netdev->mtu > ETH_DATA_LEN))
-		hwm = min(((pba << 10) * 9 / 10),
-			  ((pba << 10) - (E1000_ERT_2048 << 3)));
-	else
-		hwm = min(((pba << 10) * 9 / 10),
-			  ((pba << 10) - (2 * adapter->max_frame_size)));
+	if (hw->mac.type == e1000_pchlan) {
+		/*
+		 * Workaround PCH LOM adapter hangs with certain network
+		 * loads.  If hangs persist, try disabling Tx flow control.
+		 */
+		if (adapter->netdev->mtu > ETH_DATA_LEN) {
+			fc->high_water = 0x3500;
+			fc->low_water  = 0x1500;
+		} else {
+			fc->high_water = 0x5000;
+			fc->low_water  = 0x3000;
+		}
+	} else {
+		if ((adapter->flags & FLAG_HAS_ERT) &&
+		    (adapter->netdev->mtu > ETH_DATA_LEN))
+			hwm = min(((pba << 10) * 9 / 10),
+				  ((pba << 10) - (E1000_ERT_2048 << 3)));
+		else
+			hwm = min(((pba << 10) * 9 / 10),
+				  ((pba << 10) - (2*adapter->max_frame_size)));
 
-	fc->high_water = hwm & E1000_FCRTH_RTH; /* 8-byte granularity */
-	fc->low_water = (fc->high_water - (2 * adapter->max_frame_size));
-	fc->low_water &= E1000_FCRTL_RTL; /* 8-byte granularity */
+		fc->high_water = hwm & E1000_FCRTH_RTH; /* 8-byte granularity */
+		fc->low_water = (fc->high_water - (2*adapter->max_frame_size));
+		fc->low_water &= E1000_FCRTL_RTL; /* 8-byte granularity */
+	}
 
 	if (adapter->flags & FLAG_DISABLE_FC_PAUSE_TIME)
 		fc->pause_time = 0xFFFF;
@@ -3232,11 +3284,17 @@ void e1000e_reset(struct e1000_adapter *adapter)
 	if (mac->ops.init_hw(hw))
 		e_err("Hardware Error\n");
 
+	/* additional part of the flow-control workaround above */
+	if (hw->mac.type == e1000_pchlan)
+		ew32(FCRTV_PCH, 0x1000);
+
+#ifdef NETIF_F_HW_VLAN_TX
 	e1000_update_mng_vlan(adapter);
 
 	/* Enable h/w to recognize an 802.1Q VLAN Ethernet packet */
 	ew32(VET, ETH_P_8021Q);
 
+#endif
 	e1000e_reset_adaptive(hw);
 	e1000_get_phy_info(hw);
 
@@ -3570,11 +3628,13 @@ static int e1000_open(struct net_device *netdev)
 
 	e1000e_power_up_phy(adapter);
 
+#ifdef NETIF_F_HW_VLAN_TX
 	adapter->mng_vlan_id = E1000_MNG_VLAN_NONE;
 	if ((adapter->hw.mng_cookie.status &
 	     E1000_MNG_DHCP_COOKIE_STATUS_VLAN))
 		e1000_update_mng_vlan(adapter);
 
+#endif
 	/*
 	 * If AMT is enabled, let the firmware know that the network
 	 * interface is now open
@@ -3662,6 +3722,7 @@ static int e1000_close(struct net_device *netdev)
 	e1000e_free_tx_resources(adapter);
 	e1000e_free_rx_resources(adapter);
 
+#ifdef NETIF_F_HW_VLAN_TX
 	/*
 	 * kill manageability vlan ID if supported, but not if a vlan with
 	 * the same ID is registered on the host OS (let 8021q kill it)
@@ -3672,6 +3733,7 @@ static int e1000_close(struct net_device *netdev)
 	       vlan_group_get_device(adapter->vlgrp, adapter->mng_vlan_id)))
 		e1000_vlan_rx_kill_vid(netdev, adapter->mng_vlan_id);
 
+#endif
 	/*
 	 * If AMT is enabled, let the firmware know that the network
 	 * interface is now closed
@@ -3781,24 +3843,24 @@ void e1000e_update_stats(struct e1000_adapter *adapter)
 	if ((hw->phy.type == e1000_phy_82578) ||
 	    (hw->phy.type == e1000_phy_82577)) {
 		e1e_rphy(hw, HV_SCC_UPPER, &phy_data);
-		e1e_rphy(hw, HV_SCC_LOWER, &phy_data);
-		adapter->stats.scc += phy_data;
+		if (!e1e_rphy(hw, HV_SCC_LOWER, &phy_data))
+			adapter->stats.scc += phy_data;
 
 		e1e_rphy(hw, HV_ECOL_UPPER, &phy_data);
-		e1e_rphy(hw, HV_ECOL_LOWER, &phy_data);
-		adapter->stats.ecol += phy_data;
+		if (!e1e_rphy(hw, HV_ECOL_LOWER, &phy_data))
+			adapter->stats.ecol += phy_data;
 
 		e1e_rphy(hw, HV_MCC_UPPER, &phy_data);
-		e1e_rphy(hw, HV_MCC_LOWER, &phy_data);
-		adapter->stats.mcc += phy_data;
+		if (!e1e_rphy(hw, HV_MCC_LOWER, &phy_data))
+			adapter->stats.mcc += phy_data;
 
 		e1e_rphy(hw, HV_LATECOL_UPPER, &phy_data);
-		e1e_rphy(hw, HV_LATECOL_LOWER, &phy_data);
-		adapter->stats.latecol += phy_data;
+		if (!e1e_rphy(hw, HV_LATECOL_LOWER, &phy_data))
+			adapter->stats.latecol += phy_data;
 
 		e1e_rphy(hw, HV_DC_UPPER, &phy_data);
-		e1e_rphy(hw, HV_DC_LOWER, &phy_data);
-		adapter->stats.dc += phy_data;
+		if (!e1e_rphy(hw, HV_DC_LOWER, &phy_data))
+			adapter->stats.dc += phy_data;
 	} else {
 		adapter->stats.scc += er32(SCC);
 		adapter->stats.ecol += er32(ECOL);
@@ -3826,8 +3888,8 @@ void e1000e_update_stats(struct e1000_adapter *adapter)
 	if ((hw->phy.type == e1000_phy_82578) ||
 	    (hw->phy.type == e1000_phy_82577)) {
 		e1e_rphy(hw, HV_COLC_UPPER, &phy_data);
-		e1e_rphy(hw, HV_COLC_LOWER, &phy_data);
-		hw->mac.collision_delta = phy_data;
+		if (!e1e_rphy(hw, HV_COLC_LOWER, &phy_data))
+			hw->mac.collision_delta = phy_data;
 	} else {
 		hw->mac.collision_delta = er32(COLC);
 	}
@@ -3838,8 +3900,8 @@ void e1000e_update_stats(struct e1000_adapter *adapter)
 	if ((hw->phy.type == e1000_phy_82578) ||
 	    (hw->phy.type == e1000_phy_82577)) {
 		e1e_rphy(hw, HV_TNCRS_UPPER, &phy_data);
-		e1e_rphy(hw, HV_TNCRS_LOWER, &phy_data);
-		adapter->stats.tncrs += phy_data;
+		if (!e1e_rphy(hw, HV_TNCRS_LOWER, &phy_data))
+			adapter->stats.tncrs += phy_data;
 	} else {
 		if ((hw->mac.type != e1000_82574) &&
 		    (hw->mac.type != e1000_82583))
@@ -4032,10 +4094,12 @@ static void e1000_watchdog_task(struct work_struct *work)
 		goto link_up;
 	}
 
+#ifdef NETIF_F_HW_VLAN_TX
 	if ((e1000e_enable_tx_pkt_filtering(hw)) &&
 	    (adapter->mng_vlan_id != adapter->hw.mng_cookie.vlan_id))
 		e1000_update_mng_vlan(adapter);
 
+#endif
 	if (link) {
 		if (!netif_carrier_ok(netdev)) {
 			bool txb2b = 1;
@@ -4083,7 +4147,7 @@ static void e1000_watchdog_task(struct work_struct *work)
 			case SPEED_100:
 				txb2b = 0;
 				netdev->tx_queue_len = 100;
-				/* maybe add some timeout factor ? */
+				adapter->tx_timeout_factor = 10;
 				break;
 			}
 
@@ -4523,6 +4587,7 @@ static int e1000_transfer_dhcp_info(struct e1000_adapter *adapter,
 	struct e1000_hw *hw =  &adapter->hw;
 	u16 length, offset;
 
+#ifdef NETIF_F_HW_VLAN_TX
 	if (vlan_tx_tag_present(skb)) {
 		if (!((vlan_tx_tag_get(skb) == adapter->hw.mng_cookie.vlan_id)
 		    && (adapter->hw.mng_cookie.status &
@@ -4530,6 +4595,7 @@ static int e1000_transfer_dhcp_info(struct e1000_adapter *adapter,
 			return 0;
 	}
 
+#endif
 	if (skb->len <= MINIMUM_DHCP_PACKET_SIZE)
 		return 0;
 
@@ -4681,11 +4747,13 @@ static int e1000_xmit_frame(struct sk_buff *skb, struct net_device *netdev)
 		return NETDEV_TX_BUSY;
 	}
 
+#ifdef NETIF_F_HW_VLAN_TX
 	if (adapter->vlgrp && vlan_tx_tag_present(skb)) {
 		tx_flags |= E1000_TX_FLAGS_VLAN;
 		tx_flags |= (vlan_tx_tag_get(skb) << E1000_TX_FLAGS_VLAN_SHIFT);
 	}
 
+#endif
 	first = tx_ring->next_to_use;
 
 	tso = e1000_tso(adapter, skb);
@@ -4788,8 +4856,10 @@ static int e1000_change_mtu(struct net_device *netdev, int new_mtu)
 
 	while (test_and_set_bit(__E1000_RESETTING, &adapter->state))
 		msleep(1);
-	/* e1000e_down has a dependency on max_frame_size */
+	/* e1000e_down -> e1000e_reset dependent on max_frame_size & mtu */
 	adapter->max_frame_size = max_frame;
+	e_info("changing MTU from %d to %d\n", netdev->mtu, new_mtu);
+	netdev->mtu = new_mtu;
 	if (netif_running(netdev))
 		e1000e_down(adapter);
 
@@ -4827,9 +4897,6 @@ static int e1000_change_mtu(struct net_device *netdev, int new_mtu)
 	     (max_frame == ETH_FRAME_LEN + VLAN_HLEN + ETH_FCS_LEN))
 		adapter->rx_buffer_len = ETH_FRAME_LEN + VLAN_HLEN
 					 + ETH_FCS_LEN;
-
-	e_info("changing MTU from %d to %d\n", netdev->mtu, new_mtu);
-	netdev->mtu = new_mtu;
 
 	if (netif_running(netdev))
 		e1000e_up(adapter);
@@ -4990,7 +5057,7 @@ out:
 	return retval;
 }
 
-static int e1000_suspend(struct pci_dev *pdev, pm_message_t state)
+static int __e1000_shutdown(struct pci_dev *pdev, bool *enable_wake)
 {
 	struct net_device *netdev = pci_get_drvdata(pdev);
 	struct e1000_adapter *adapter = netdev_priv(netdev);
@@ -5044,7 +5111,7 @@ static int e1000_suspend(struct pci_dev *pdev, pm_message_t state)
 		    e1000_media_type_internal_serdes) {
 			/* keep the laser running in D3 */
 			ctrl_ext = er32(CTRL_EXT);
-			ctrl_ext |= E1000_CTRL_EXT_SDP7_DATA;
+			ctrl_ext |= E1000_CTRL_EXT_SDP3_DATA;
 			ew32(CTRL_EXT, ctrl_ext);
 		}
 
@@ -5054,8 +5121,7 @@ static int e1000_suspend(struct pci_dev *pdev, pm_message_t state)
 		/* Allow time for pending master requests to run */
 		e1000e_disable_pcie_master(&adapter->hw);
 
-		if ((adapter->flags2 & FLAG2_HAS_PHY_WAKEUP) &&
-		    !(hw->mac.ops.check_mng_mode(hw))) {
+		if (adapter->flags2 & FLAG2_HAS_PHY_WAKEUP) {
 			/* enable wakeup by the PHY */
 			retval = e1000_init_phy_wakeup(adapter, wufc);
 			if (retval)
@@ -5065,20 +5131,17 @@ static int e1000_suspend(struct pci_dev *pdev, pm_message_t state)
 			ew32(WUFC, wufc);
 			ew32(WUC, E1000_WUC_PME_EN);
 		}
-		pci_enable_wake(pdev, PCI_D3hot, 1);
-		pci_enable_wake(pdev, PCI_D3cold, 1);
 	} else {
 		ew32(WUC, 0);
 		ew32(WUFC, 0);
-		pci_enable_wake(pdev, PCI_D3hot, 0);
-		pci_enable_wake(pdev, PCI_D3cold, 0);
 	}
 
+	*enable_wake = !!wufc;
+
 	/* make sure adapter isn't asleep if manageability is enabled */
-	if (adapter->flags & FLAG_MNG_PT_ENABLED) {
-		pci_enable_wake(pdev, PCI_D3hot, 1);
-		pci_enable_wake(pdev, PCI_D3cold, 1);
-	}
+	if ((adapter->flags & FLAG_MNG_PT_ENABLED) ||
+	    (hw->mac.ops.check_mng_mode(hw)))
+		*enable_wake = true;
 
 	if (adapter->hw.phy.type == e1000_phy_igp_3)
 		e1000e_igp3_phy_powerdown_workaround_ich8lan(&adapter->hw);
@@ -5090,6 +5153,26 @@ static int e1000_suspend(struct pci_dev *pdev, pm_message_t state)
 	e1000_release_hw_control(adapter);
 
 	pci_disable_device(pdev);
+
+	return 0;
+}
+
+static void e1000_power_off(struct pci_dev *pdev, bool sleep, bool wake)
+{
+	if (sleep && wake) {
+		pci_prepare_to_sleep(pdev);
+		return;
+	}
+
+	pci_wake_from_d3(pdev, wake);
+	pci_set_power_state(pdev, PCI_D3hot);
+}
+
+static void e1000_complete_shutdown(struct pci_dev *pdev, bool sleep,
+                                    bool wake)
+{
+	struct net_device *netdev = pci_get_drvdata(pdev);
+	struct e1000_adapter *adapter = netdev_priv(netdev);
 
 	/*
 	 * The pci-e switch on some quad port adapters will report a
@@ -5106,14 +5189,12 @@ static int e1000_suspend(struct pci_dev *pdev, pm_message_t state)
 		pci_write_config_word(us_dev, pos + PCI_EXP_DEVCTL,
 		                      (devctl & ~PCI_EXP_DEVCTL_CERE));
 
-		pci_set_power_state(pdev, pci_choose_state(pdev, state));
+		e1000_power_off(pdev, sleep, wake);
 
 		pci_write_config_word(us_dev, pos + PCI_EXP_DEVCTL, devctl);
 	} else {
-		pci_set_power_state(pdev, pci_choose_state(pdev, state));
+		e1000_power_off(pdev, sleep, wake);
 	}
-
-	return 0;
 }
 
 static void e1000e_disable_l1aspm(struct pci_dev *pdev)
@@ -5142,6 +5223,18 @@ static void e1000e_disable_l1aspm(struct pci_dev *pdev)
 }
 
 #ifdef CONFIG_PM
+static int e1000_suspend(struct pci_dev *pdev, pm_message_t state)
+{
+	int retval;
+	bool wake;
+
+	retval = __e1000_shutdown(pdev, &wake);
+	if (!retval)
+		e1000_complete_shutdown(pdev, true, wake);
+
+	return retval;
+}
+
 static int e1000_resume(struct pci_dev *pdev)
 {
 	struct net_device *netdev = pci_get_drvdata(pdev);
@@ -5237,7 +5330,12 @@ static int e1000_resume(struct pci_dev *pdev)
 #ifndef USE_REBOOT_NOTIFIER
 static void e1000_shutdown(struct pci_dev *pdev)
 {
-	e1000_suspend(pdev, PMSG_SUSPEND);
+	bool wake;
+
+	__e1000_shutdown(pdev, &wake);
+
+	if (system_state == SYSTEM_POWER_OFF)
+		e1000_complete_shutdown(pdev, false, wake);
 }
 #else
 static struct pci_driver e1000_driver;
@@ -5303,6 +5401,9 @@ static pci_ers_result_t e1000_io_error_detected(struct pci_dev *pdev,
 	struct e1000_adapter *adapter = netdev_priv(netdev);
 
 	netif_device_detach(netdev);
+
+	if (state == pci_channel_io_perm_failure)
+		return PCI_ERS_RESULT_DISCONNECT;
 
 	if (netif_running(netdev))
 		e1000e_down(adapter);
@@ -5460,10 +5561,11 @@ static const struct net_device_ops e1000e_netdev_ops = {
 	.ndo_do_ioctl		= e1000_ioctl,
 	.ndo_tx_timeout		= e1000_tx_timeout,
 	.ndo_validate_addr	= eth_validate_addr,
-
+#ifdef NETIF_F_HW_VLAN_TX
 	.ndo_vlan_rx_register	= e1000_vlan_rx_register,
 	.ndo_vlan_rx_add_vid	= e1000_vlan_rx_add_vid,
 	.ndo_vlan_rx_kill_vid	= e1000_vlan_rx_kill_vid,
+#endif
 #ifdef CONFIG_NET_POLL_CONTROLLER
 	.ndo_poll_controller	= e1000_netpoll,
 #endif
@@ -5597,9 +5699,11 @@ static int __devinit e1000_probe(struct pci_dev *pdev,
 	netdev->change_mtu		= &e1000_change_mtu;
 	netdev->do_ioctl		= &e1000_ioctl;
 	netdev->tx_timeout		= &e1000_tx_timeout;
+#ifdef NETIF_F_HW_VLAN_TX
 	netdev->vlan_rx_register	= e1000_vlan_rx_register;
 	netdev->vlan_rx_add_vid		= e1000_vlan_rx_add_vid;
 	netdev->vlan_rx_kill_vid	= e1000_vlan_rx_kill_vid;
+#endif
 #ifdef CONFIG_NET_POLL_CONTROLLER
 	netdev->poll_controller		= e1000_netpoll;
 #endif
@@ -5625,6 +5729,7 @@ static int __devinit e1000_probe(struct pci_dev *pdev,
 	if (e1000_check_reset_block(&adapter->hw))
 		e_info("PHY reset is blocked due to SOL/IDER session.\n");
 
+#ifdef NETIF_F_HW_VLAN_TX
 	netdev->features = NETIF_F_SG |
 			   NETIF_F_HW_CSUM |
 			   NETIF_F_HW_VLAN_TX |
@@ -5632,6 +5737,9 @@ static int __devinit e1000_probe(struct pci_dev *pdev,
 
 	if (adapter->flags & FLAG_HAS_HW_VLAN_FILTER)
 		netdev->features |= NETIF_F_HW_VLAN_FILTER;
+#else
+	netdev->features = NETIF_F_SG | NETIF_F_HW_CSUM;
+#endif
 
 #ifdef NETIF_F_TSO
 	netdev->features |= NETIF_F_TSO;
@@ -5701,6 +5809,7 @@ static int __devinit e1000_probe(struct pci_dev *pdev,
 	INIT_WORK(&adapter->watchdog_task, e1000_watchdog_task);
 	INIT_WORK(&adapter->downshift_task, e1000e_downshift_workaround);
 	INIT_WORK(&adapter->update_phy_task, e1000e_update_phy_task);
+	INIT_WORK(&adapter->print_hang_task, e1000_print_hw_hang);
 
 	/* Initialize link parameters. User can change them with ethtool */
 	adapter->hw.mac.autoneg = 1;
@@ -5832,6 +5941,11 @@ static void __devexit e1000_remove(struct pci_dev *pdev)
 	del_timer_sync(&adapter->watchdog_timer);
 	del_timer_sync(&adapter->phy_info_timer);
 
+	cancel_work_sync(&adapter->reset_task);
+	cancel_work_sync(&adapter->watchdog_task);
+	cancel_work_sync(&adapter->downshift_task);
+	cancel_work_sync(&adapter->update_phy_task);
+	cancel_work_sync(&adapter->print_hang_task);
 	flush_scheduled_work();
 
 	/*

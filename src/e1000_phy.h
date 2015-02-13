@@ -51,13 +51,17 @@ void e1000e_phy_force_speed_duplex_setup(struct e1000_hw *hw, u16 *phy_ctrl);
 s32  e1000e_phy_hw_reset_generic(struct e1000_hw *hw);
 s32  e1000e_phy_reset_dsp(struct e1000_hw *hw);
 s32  e1000e_read_kmrn_reg(struct e1000_hw *hw, u32 offset, u16 *data);
+s32  e1000_read_kmrn_reg_locked(struct e1000_hw *hw, u32 offset, u16 *data);
 s32  e1000e_read_phy_reg_igp(struct e1000_hw *hw, u32 offset, u16 *data);
+s32  e1000e_read_phy_reg_igp_locked(struct e1000_hw *hw, u32 offset, u16 *data);
 s32  e1000e_read_phy_reg_m88(struct e1000_hw *hw, u32 offset, u16 *data);
 s32  e1000e_set_d3_lplu_state(struct e1000_hw *hw, bool active);
 s32  e1000e_setup_copper_link(struct e1000_hw *hw);
 s32  e1000_wait_autoneg(struct e1000_hw *hw);
 s32  e1000e_write_kmrn_reg(struct e1000_hw *hw, u32 offset, u16 data);
+s32  e1000_write_kmrn_reg_locked(struct e1000_hw *hw, u32 offset, u16 data);
 s32  e1000e_write_phy_reg_igp(struct e1000_hw *hw, u32 offset, u16 data);
+s32  e1000e_write_phy_reg_igp_locked(struct e1000_hw *hw, u32 offset, u16 data);
 s32  e1000e_write_phy_reg_m88(struct e1000_hw *hw, u32 offset, u16 data);
 s32  e1000_phy_reset_dsp(struct e1000_hw *hw);
 s32  e1000e_phy_has_link_generic(struct e1000_hw *hw, u32 iterations,
@@ -74,7 +78,9 @@ void e1000_power_down_phy_copper(struct e1000_hw *hw);
 s32  e1000e_read_phy_reg_mdic(struct e1000_hw *hw, u32 offset, u16 *data);
 s32  e1000e_write_phy_reg_mdic(struct e1000_hw *hw, u32 offset, u16 data);
 s32  e1000_read_phy_reg_hv(struct e1000_hw *hw, u32 offset, u16 *data);
+s32  e1000_read_phy_reg_hv_locked(struct e1000_hw *hw, u32 offset, u16 *data);
 s32  e1000_write_phy_reg_hv(struct e1000_hw *hw, u32 offset, u16 data);
+s32  e1000_write_phy_reg_hv_locked(struct e1000_hw *hw, u32 offset, u16 data);
 s32  e1000_set_mdio_slow_mode_hv(struct e1000_hw *hw, bool slow);
 s32  e1000_link_stall_workaround_hv(struct e1000_hw *hw);
 s32  e1000_copper_link_setup_82577(struct e1000_hw *hw);
@@ -163,6 +169,13 @@ s32  e1000_get_cable_length_82577(struct e1000_hw *hw);
 #define BM_CS_STATUS_SPEED_MASK           0xC000
 #define BM_CS_STATUS_SPEED_1000           0x8000
 
+/* 82577 Mobile Phy Status Register */
+#define HV_M_STATUS                       26
+#define HV_M_STATUS_AUTONEG_COMPLETE      0x1000
+#define HV_M_STATUS_SPEED_MASK            0x0300
+#define HV_M_STATUS_SPEED_1000            0x0200
+#define HV_M_STATUS_LINK_UP               0x0040
+
 #define IGP01E1000_PHY_PCS_INIT_REG       0x00B4
 #define IGP01E1000_PHY_POLARITY_MASK      0x0078
 
@@ -209,8 +222,7 @@ s32  e1000_get_cable_length_82577(struct e1000_hw *hw);
 #define E1000_KMRNCTRLSTA_INBAND_PARAM    0x9    /* Kumeran InBand Parameters */
 #define E1000_KMRNCTRLSTA_DIAG_NELPBK     0x1000 /* Nearend Loopback mode */
 #define E1000_KMRNCTRLSTA_K1_CONFIG        0x7
-#define E1000_KMRNCTRLSTA_K1_ENABLE        0x140E
-#define E1000_KMRNCTRLSTA_K1_DISABLE       0x1400
+#define E1000_KMRNCTRLSTA_K1_ENABLE        0x0002
 
 #define IFE_PHY_EXTENDED_STATUS_CONTROL 0x10
 #define IFE_PHY_SPECIAL_CONTROL     0x11 /* 100BaseTx PHY Special Control */

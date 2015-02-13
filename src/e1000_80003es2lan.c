@@ -278,6 +278,9 @@ static s32 e1000_init_mac_params_80003es2lan(struct e1000_hw *hw)
 	/* link info */
 	mac->ops.get_link_up_info = e1000_get_link_up_info_80003es2lan;
 
+	/* set lan id for port to determine which phy lock to use */
+	hw->mac.ops.set_lan_id(hw);
+
 out:
 	return ret_val;
 }
@@ -295,7 +298,6 @@ void e1000_init_function_pointers_80003es2lan(struct e1000_hw *hw)
 	hw->mac.ops.init_params = e1000_init_mac_params_80003es2lan;
 	hw->nvm.ops.init_params = e1000_init_nvm_params_80003es2lan;
 	hw->phy.ops.init_params = e1000_init_phy_params_80003es2lan;
-	e1000e_get_bus_info_pcie(hw);
 }
 
 /**
@@ -502,28 +504,35 @@ static s32 e1000_read_phy_reg_gg82563_80003es2lan(struct e1000_hw *hw,
 		goto out;
 	}
 
-	/*
-	 * The "ready" bit in the MDIC register may be incorrectly set
-	 * before the device has completed the "Page Select" MDI
-	 * transaction.  So we wait 200us after each MDI command...
-	 */
-	udelay(200);
+	if (hw->dev_spec._80003es2lan.mdic_wa_enable == true) {
+		/*
+		 * The "ready" bit in the MDIC register may be incorrectly set
+		 * before the device has completed the "Page Select" MDI
+		 * transaction.  So we wait 200us after each MDI command...
+		 */
+		udelay(200);
 
-	/* ...and verify the command was successful. */
-	ret_val = e1000e_read_phy_reg_mdic(hw, page_select, &temp);
+		/* ...and verify the command was successful. */
+		ret_val = e1000e_read_phy_reg_mdic(hw, page_select, &temp);
 
-	if (((u16)offset >> GG82563_PAGE_SHIFT) != temp) {
-		ret_val = -E1000_ERR_PHY;
-		e1000_release_phy_80003es2lan(hw);
-		goto out;
-	}
+		if (((u16)offset >> GG82563_PAGE_SHIFT) != temp) {
+			ret_val = -E1000_ERR_PHY;
+			e1000_release_phy_80003es2lan(hw);
+			goto out;
+		}
 
-	udelay(200);
+		udelay(200);
 
-	ret_val = e1000e_read_phy_reg_mdic(hw, MAX_PHY_REG_ADDRESS & offset,
-	                                   data);
+		ret_val = e1000e_read_phy_reg_mdic(hw,
+		                                  MAX_PHY_REG_ADDRESS & offset,
+		                                  data);
 
-	udelay(200);
+		udelay(200);
+	} else
+		ret_val = e1000e_read_phy_reg_mdic(hw,
+		                                  MAX_PHY_REG_ADDRESS & offset,
+		                                  data);
+
 	e1000_release_phy_80003es2lan(hw);
 
 out:
@@ -567,29 +576,35 @@ static s32 e1000_write_phy_reg_gg82563_80003es2lan(struct e1000_hw *hw,
 		goto out;
 	}
 
+	if (hw->dev_spec._80003es2lan.mdic_wa_enable == true) {
+		/*
+		 * The "ready" bit in the MDIC register may be incorrectly set
+		 * before the device has completed the "Page Select" MDI
+		 * transaction.  So we wait 200us after each MDI command...
+		 */
+		udelay(200);
 
-	/*
-	 * The "ready" bit in the MDIC register may be incorrectly set
-	 * before the device has completed the "Page Select" MDI
-	 * transaction.  So we wait 200us after each MDI command...
-	 */
-	udelay(200);
+		/* ...and verify the command was successful. */
+		ret_val = e1000e_read_phy_reg_mdic(hw, page_select, &temp);
 
-	/* ...and verify the command was successful. */
-	ret_val = e1000e_read_phy_reg_mdic(hw, page_select, &temp);
+		if (((u16)offset >> GG82563_PAGE_SHIFT) != temp) {
+			ret_val = -E1000_ERR_PHY;
+			e1000_release_phy_80003es2lan(hw);
+			goto out;
+		}
 
-	if (((u16)offset >> GG82563_PAGE_SHIFT) != temp) {
-		ret_val = -E1000_ERR_PHY;
-		e1000_release_phy_80003es2lan(hw);
-		goto out;
-	}
+		udelay(200);
 
-	udelay(200);
+		ret_val = e1000e_write_phy_reg_mdic(hw,
+		                                  MAX_PHY_REG_ADDRESS & offset,
+		                                  data);
 
-	ret_val = e1000e_write_phy_reg_mdic(hw, MAX_PHY_REG_ADDRESS & offset,
-	                                  data);
+		udelay(200);
+	} else
+		ret_val = e1000e_write_phy_reg_mdic(hw,
+		                                  MAX_PHY_REG_ADDRESS & offset,
+		data);
 
-	udelay(200);
 	e1000_release_phy_80003es2lan(hw);
 
 out:
@@ -762,13 +777,13 @@ static s32 e1000_get_cable_length_80003es2lan(struct e1000_hw *hw)
 
 	index = phy_data & GG82563_DSPD_CABLE_LENGTH;
 
-	if (index >= GG82563_CABLE_LENGTH_TABLE_SIZE + 5) {
+	if (index >= GG82563_CABLE_LENGTH_TABLE_SIZE - 5) {
 		ret_val = E1000_ERR_PHY;
 		goto out;
 	}
 
 	phy->min_cable_length = e1000_gg82563_cable_length_table[index];
-	phy->max_cable_length = e1000_gg82563_cable_length_table[index+5];
+	phy->max_cable_length = e1000_gg82563_cable_length_table[index + 5];
 
 	phy->cable_length = (phy->min_cable_length + phy->max_cable_length) / 2;
 
@@ -922,6 +937,19 @@ static s32 e1000_init_hw_80003es2lan(struct e1000_hw *hw)
 	reg_data = E1000_READ_REG_ARRAY(hw, E1000_FFLT, 0x0001);
 	reg_data &= ~0x00100000;
 	E1000_WRITE_REG_ARRAY(hw, E1000_FFLT, 0x0001, reg_data);
+
+	/* default to true to enable the MDIC W/A */
+	hw->dev_spec._80003es2lan.mdic_wa_enable = true;
+
+	ret_val = e1000_read_kmrn_reg_80003es2lan(hw,
+	                              E1000_KMRNCTRLSTA_OFFSET >>
+	                              E1000_KMRNCTRLSTA_OFFSET_SHIFT,
+	                              &i);
+	if (!ret_val) {
+		if ((i & E1000_KMRNCTRLSTA_OPMODE_MASK) ==
+		     E1000_KMRNCTRLSTA_OPMODE_INBAND_MDIO)
+			hw->dev_spec._80003es2lan.mdic_wa_enable = false;
+	}
 
 	/*
 	 * Clear all of the statistics registers (clear on read).  It is

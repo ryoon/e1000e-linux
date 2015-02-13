@@ -62,10 +62,13 @@ static s32  e1000_init_nvm_params_ich8lan(struct e1000_hw *hw);
 static s32  e1000_init_mac_params_ich8lan(struct e1000_hw *hw);
 static s32  e1000_acquire_swflag_ich8lan(struct e1000_hw *hw);
 static void e1000_release_swflag_ich8lan(struct e1000_hw *hw);
+static s32  e1000_acquire_nvm_ich8lan(struct e1000_hw *hw);
+static void e1000_release_nvm_ich8lan(struct e1000_hw *hw);
 static bool e1000_check_mng_mode_ich8lan(struct e1000_hw *hw);
 static s32  e1000_check_reset_block_ich8lan(struct e1000_hw *hw);
 static s32  e1000_phy_hw_reset_ich8lan(struct e1000_hw *hw);
 static s32  e1000_get_phy_info_ich8lan(struct e1000_hw *hw);
+static s32  e1000_set_lplu_state_pchlan(struct e1000_hw *hw, bool active);
 static s32  e1000_set_d0_lplu_state_ich8lan(struct e1000_hw *hw,
                                             bool active);
 static s32  e1000_set_d3_lplu_state_ich8lan(struct e1000_hw *hw,
@@ -89,6 +92,7 @@ static s32  e1000_get_link_up_info_ich8lan(struct e1000_hw *hw,
 static s32  e1000_cleanup_led_ich8lan(struct e1000_hw *hw);
 static s32  e1000_led_on_ich8lan(struct e1000_hw *hw);
 static s32  e1000_led_off_ich8lan(struct e1000_hw *hw);
+static s32  e1000_k1_gig_workaround_hv(struct e1000_hw *hw, bool link);
 static s32  e1000_setup_led_pchlan(struct e1000_hw *hw);
 static s32  e1000_cleanup_led_pchlan(struct e1000_hw *hw);
 static s32  e1000_led_on_pchlan(struct e1000_hw *hw);
@@ -115,6 +119,8 @@ static s32  e1000_write_flash_data_ich8lan(struct e1000_hw *hw, u32 offset,
 static s32 e1000_get_cfg_done_ich8lan(struct e1000_hw *hw);
 static void e1000_power_down_phy_copper_ich8lan(struct e1000_hw *hw);
 static s32 e1000_check_for_copper_link_ich8lan(struct e1000_hw *hw);
+static void e1000_lan_init_done_ich8lan(struct e1000_hw *hw);
+static s32 e1000_sw_lcd_config_ich8lan(struct e1000_hw *hw);
 
 /* ICH GbE Flash Hardware Sequencing Flash Status Register bit breakdown */
 /* Offset 04h HSFSTS */
@@ -179,11 +185,13 @@ static s32 e1000_init_phy_params_pchlan(struct e1000_hw *hw)
 	phy->ops.get_cfg_done         = e1000_get_cfg_done_ich8lan;
 	phy->ops.get_info             = e1000_get_phy_info_ich8lan;
 	phy->ops.read_reg             = e1000_read_phy_reg_hv;
+	phy->ops.read_reg_locked      = e1000_read_phy_reg_hv_locked;
 	phy->ops.release              = e1000_release_swflag_ich8lan;
 	phy->ops.reset                = e1000_phy_hw_reset_ich8lan;
-	phy->ops.set_d0_lplu_state    = e1000_set_d0_lplu_state_ich8lan;
-	phy->ops.set_d3_lplu_state    = e1000_set_d3_lplu_state_ich8lan;
+	phy->ops.set_d0_lplu_state    = e1000_set_lplu_state_pchlan;
+	phy->ops.set_d3_lplu_state    = e1000_set_lplu_state_pchlan;
 	phy->ops.write_reg            = e1000_write_phy_reg_hv;
+	phy->ops.write_reg_locked     = e1000_write_phy_reg_hv_locked;
 	phy->ops.power_up             = e1000_power_up_phy_copper;
 	phy->ops.power_down           = e1000_power_down_phy_copper_ich8lan;
 	phy->autoneg_mask             = AUTONEG_ADVERTISE_SPEED_DEFAULT;
@@ -264,6 +272,8 @@ static s32 e1000_init_phy_params_ich8lan(struct e1000_hw *hw)
 	case IGP03E1000_E_PHY_ID:
 		phy->type = e1000_phy_igp_3;
 		phy->autoneg_mask = AUTONEG_ADVERTISE_SPEED_DEFAULT;
+		phy->ops.read_reg_locked = e1000e_read_phy_reg_igp_locked;
+		phy->ops.write_reg_locked = e1000e_write_phy_reg_igp_locked;
 		break;
 	case IFE_E_PHY_ID:
 	case IFE_PLUS_E_PHY_ID:
@@ -298,7 +308,6 @@ static s32 e1000_init_nvm_params_ich8lan(struct e1000_hw *hw)
 {
 	struct e1000_nvm_info *nvm = &hw->nvm;
 	struct e1000_dev_spec_ich8lan *dev_spec = &hw->dev_spec.ich8lan;
-	union ich8_hws_flash_status hsfsts;
 	u32 gfpreg, sector_base_addr, sector_end_addr;
 	s32 ret_val = E1000_SUCCESS;
 	u16 i;
@@ -335,20 +344,6 @@ static s32 e1000_init_nvm_params_ich8lan(struct e1000_hw *hw)
 	/* Adjust to word count */
 	nvm->flash_bank_size /= sizeof(u16);
 
-	/*
-	 * Make sure the flash bank size does not overwrite the 4k
-	 * sector ranges. We may have 64k allotted to us but we only care
-	 * about the first 2 4k sectors. Therefore, if we have anything less
-	 * than 64k set in the HSFSTS register, we will reduce the bank size
-	 * down to 4k and let the rest remain unused. If berasesz == 3, then
-	 * we are working in 64k mode. Otherwise we are not.
-	 */
-	if (nvm->flash_bank_size > E1000_ICH8_SHADOW_RAM_WORDS) {
-		hsfsts.regval = er16flash(ICH_FLASH_HSFSTS);
-		if (hsfsts.hsf_status.berasesz != 3)
-			nvm->flash_bank_size = E1000_ICH8_SHADOW_RAM_WORDS;
-	}
-
 	nvm->word_size = E1000_ICH8_SHADOW_RAM_WORDS;
 
 	/* Clear shadow ram */
@@ -358,9 +353,9 @@ static s32 e1000_init_nvm_params_ich8lan(struct e1000_hw *hw)
 	}
 
 	/* Function Pointers */
-	nvm->ops.acquire       = e1000_acquire_swflag_ich8lan;
+	nvm->ops.acquire       = e1000_acquire_nvm_ich8lan;
+	nvm->ops.release       = e1000_release_nvm_ich8lan;
 	nvm->ops.read          = e1000_read_nvm_ich8lan;
-	nvm->ops.release       = e1000_release_swflag_ich8lan;
 	nvm->ops.update        = e1000_update_nvm_checksum_ich8lan;
 	nvm->ops.valid_led_default = e1000_valid_led_default_ich8lan;
 	nvm->ops.validate      = e1000_validate_nvm_checksum_ich8lan;
@@ -487,14 +482,6 @@ static s32 e1000_check_for_copper_link_ich8lan(struct e1000_hw *hw)
 		goto out;
 	}
 
-	if (hw->mac.type == e1000_pchlan) {
-		ret_val = e1000e_write_kmrn_reg(hw,
-						   E1000_KMRNCTRLSTA_K1_CONFIG,
-						   E1000_KMRNCTRLSTA_K1_ENABLE);
-		if (ret_val)
-			goto out;
-	}
-
 	/*
 	 * First we want to see if the MII Status Register reports
 	 * link.  If so, then we want to get the current speed/duplex
@@ -503,6 +490,12 @@ static s32 e1000_check_for_copper_link_ich8lan(struct e1000_hw *hw)
 	ret_val = e1000e_phy_has_link_generic(hw, 1, 0, &link);
 	if (ret_val)
 		goto out;
+
+	if (hw->mac.type == e1000_pchlan) {
+		ret_val = e1000_k1_gig_workaround_hv(hw, link);
+		if (ret_val)
+			goto out;
+	}
 
 	if (!link)
 		goto out; /* No link detected */
@@ -580,47 +573,89 @@ void e1000_init_function_pointers_ich8lan(struct e1000_hw *hw)
 static DEFINE_MUTEX(nvm_mutex);
 
 /**
+ *  e1000_acquire_nvm_ich8lan - Acquire NVM mutex
+ *  @hw: pointer to the HW structure
+ *
+ *  Acquires the mutex for performing NVM operations.
+ **/
+static s32 e1000_acquire_nvm_ich8lan(struct e1000_hw *hw)
+{
+	mutex_lock(&nvm_mutex);
+
+	return E1000_SUCCESS;
+}
+
+/**
+ *  e1000_release_nvm_ich8lan - Release NVM mutex
+ *  @hw: pointer to the HW structure
+ *
+ *  Releases the mutex used while performing NVM operations.
+ **/
+static void e1000_release_nvm_ich8lan(struct e1000_hw *hw)
+{
+	mutex_unlock(&nvm_mutex);
+
+	return;
+}
+
+static DEFINE_MUTEX(swflag_mutex);
+
+/**
  *  e1000_acquire_swflag_ich8lan - Acquire software control flag
  *  @hw: pointer to the HW structure
  *
- *  Acquires the software control flag for performing NVM and PHY
- *  operations.  This is a function pointer entry point only called by
- *  read/write routines for the PHY and NVM parts.
+ *  Acquires the software control flag for performing PHY and select
+ *  MAC CSR accesses.
  **/
 static s32 e1000_acquire_swflag_ich8lan(struct e1000_hw *hw)
 {
 	u32 extcnf_ctrl, timeout = PHY_CFG_TIMEOUT;
 	s32 ret_val = E1000_SUCCESS;
 
-	might_sleep();
-
-	mutex_lock(&nvm_mutex);
+	mutex_lock(&swflag_mutex);
 
 	while (timeout) {
 		extcnf_ctrl = er32(EXTCNF_CTRL);
+		if (!(extcnf_ctrl & E1000_EXTCNF_CTRL_SWFLAG))
+			break;
 
-		if (!(extcnf_ctrl & E1000_EXTCNF_CTRL_SWFLAG)) {
-			extcnf_ctrl |= E1000_EXTCNF_CTRL_SWFLAG;
-			ew32(EXTCNF_CTRL, extcnf_ctrl);
-
-			extcnf_ctrl = er32(EXTCNF_CTRL);
-			if (extcnf_ctrl & E1000_EXTCNF_CTRL_SWFLAG)
-				break;
-		}
 		mdelay(1);
 		timeout--;
 	}
 
 	if (!timeout) {
 		e_dbg("SW/FW/HW has locked the resource for too long.\n");
+		ret_val = -E1000_ERR_CONFIG;
+		goto out;
+	}
+
+	/* In some cases, hardware will take up to 400ms to set the SW flag. */
+	timeout = SW_FLAG_TIMEOUT;
+
+	extcnf_ctrl |= E1000_EXTCNF_CTRL_SWFLAG;
+	ew32(EXTCNF_CTRL, extcnf_ctrl);
+
+	while (timeout) {
+		extcnf_ctrl = er32(EXTCNF_CTRL);
+		if (extcnf_ctrl & E1000_EXTCNF_CTRL_SWFLAG)
+			break;
+
+		mdelay(1);
+		timeout--;
+	}
+
+	if (!timeout) {
+		e_dbg("Failed to acquire the semaphore.\n");
 		extcnf_ctrl &= ~E1000_EXTCNF_CTRL_SWFLAG;
 		ew32(EXTCNF_CTRL, extcnf_ctrl);
-		mutex_unlock(&nvm_mutex);
 		ret_val = -E1000_ERR_CONFIG;
 		goto out;
 	}
 
 out:
+	if (ret_val)
+		mutex_unlock(&swflag_mutex);
+
 	return ret_val;
 }
 
@@ -628,9 +663,8 @@ out:
  *  e1000_release_swflag_ich8lan - Release software control flag
  *  @hw: pointer to the HW structure
  *
- *  Releases the software control flag for performing NVM and PHY operations.
- *  This is a function pointer entry point only called by read/write
- *  routines for the PHY and NVM parts.
+ *  Releases the software control flag for performing PHY and select
+ *  MAC CSR accesses.
  **/
 static void e1000_release_swflag_ich8lan(struct e1000_hw *hw)
 {
@@ -640,7 +674,9 @@ static void e1000_release_swflag_ich8lan(struct e1000_hw *hw)
 	extcnf_ctrl &= ~E1000_EXTCNF_CTRL_SWFLAG;
 	ew32(EXTCNF_CTRL, extcnf_ctrl);
 
-	mutex_unlock(&nvm_mutex);
+	mutex_unlock(&swflag_mutex);
+
+	return;
 }
 
 /**
@@ -677,6 +713,339 @@ static s32 e1000_check_reset_block_ich8lan(struct e1000_hw *hw)
 }
 
 /**
+ *  e1000_sw_lcd_config_ich8lan - SW-based LCD Configuration
+ *  @hw:   pointer to the HW structure
+ *
+ *  SW should configure the LCD from the NVM extended configuration region
+ *  as a workaround for certain parts.
+ **/
+static s32 e1000_sw_lcd_config_ich8lan(struct e1000_hw *hw)
+{
+	struct e1000_dev_spec_ich8lan *dev_spec = &hw->dev_spec.ich8lan;
+	struct e1000_phy_info *phy = &hw->phy;
+	u32 i, data, cnf_size, cnf_base_addr, sw_cfg_mask;
+	s32 ret_val;
+	u16 word_addr, reg_data, reg_addr, phy_page = 0;
+
+	ret_val = hw->phy.ops.acquire(hw);
+	if (ret_val)
+		return ret_val;
+
+	/*
+	 * Initialize the PHY from the NVM on ICH platforms.  This
+	 * is needed due to an issue where the NVM configuration is
+	 * not properly autoloaded after power transitions.
+	 * Therefore, after each PHY reset, we will load the
+	 * configuration data out of the NVM manually.
+	 */
+	if ((hw->mac.type == e1000_ich8lan && phy->type == e1000_phy_igp_3) ||
+		(hw->mac.type == e1000_pchlan)) {
+		/* Check if SW needs to configure the PHY */
+		if ((hw->device_id == E1000_DEV_ID_ICH8_IGP_M_AMT) ||
+		    (hw->device_id == E1000_DEV_ID_ICH8_IGP_M) ||
+		    (hw->mac.type == e1000_pchlan))
+			sw_cfg_mask = E1000_FEXTNVM_SW_CONFIG_ICH8M;
+		else
+			sw_cfg_mask = E1000_FEXTNVM_SW_CONFIG;
+
+		data = er32(FEXTNVM);
+		if (!(data & sw_cfg_mask))
+			goto out;
+
+		/* Wait for basic configuration completes before proceeding */
+		e1000_lan_init_done_ich8lan(hw);
+
+		/*
+		 * Make sure HW does not configure LCD from PHY
+		 * extended configuration before SW configuration
+		 */
+		data = er32(EXTCNF_CTRL);
+		if (data & E1000_EXTCNF_CTRL_LCD_WRITE_ENABLE)
+			goto out;
+
+		cnf_size = er32(EXTCNF_SIZE);
+		cnf_size &= E1000_EXTCNF_SIZE_EXT_PCIE_LENGTH_MASK;
+		cnf_size >>= E1000_EXTCNF_SIZE_EXT_PCIE_LENGTH_SHIFT;
+		if (!cnf_size)
+			goto out;
+
+		cnf_base_addr = data & E1000_EXTCNF_CTRL_EXT_CNF_POINTER_MASK;
+		cnf_base_addr >>= E1000_EXTCNF_CTRL_EXT_CNF_POINTER_SHIFT;
+
+		if (!(data & E1000_EXTCNF_CTRL_OEM_WRITE_ENABLE) &&
+			hw->mac.type == e1000_pchlan) {
+			/*
+			 * HW configures the SMBus address and LEDs when the
+			 * OEM and LCD Write Enable bits are set in the NVM.
+			 * When both NVM bits are cleared, SW will configure
+			 * them instead.
+			 */
+			data = er32(STRAP);
+			data &= E1000_STRAP_SMBUS_ADDRESS_MASK;
+			reg_data = data >> E1000_STRAP_SMBUS_ADDRESS_SHIFT;
+			reg_data |= HV_SMB_ADDR_PEC_EN | HV_SMB_ADDR_VALID;
+			ret_val = e1000_write_phy_reg_hv_locked(hw, HV_SMB_ADDR,
+			                                        reg_data);
+			if (ret_val)
+				goto out;
+
+			data = er32(LEDCTL);
+			ret_val = e1000_write_phy_reg_hv_locked(hw,
+			                                        HV_LED_CONFIG,
+			                                        (u16)data);
+			if (ret_val)
+				goto out;
+
+			dev_spec->nvm_lcd_config_enabled = true;
+		}
+		/* Configure LCD from extended configuration region. */
+
+		/* cnf_base_addr is in DWORD */
+		word_addr = (u16)(cnf_base_addr << 1);
+
+		for (i = 0; i < cnf_size; i++) {
+			ret_val = e1000_read_nvm(hw, (word_addr + i * 2), 1,
+			                           &reg_data);
+			if (ret_val)
+				goto out;
+
+			ret_val = e1000_read_nvm(hw, (word_addr + i * 2 + 1),
+			                           1, &reg_addr);
+			if (ret_val)
+				goto out;
+
+			/* Save off the PHY page for future writes. */
+			if (reg_addr == IGP01E1000_PHY_PAGE_SELECT) {
+				phy_page = reg_data;
+				continue;
+			}
+			/*
+			 * Bit 5 in the LCD config word contains the phy
+			 * address for PCH
+			 */
+			if (hw->mac.type == e1000_pchlan) {
+				phy->addr = 1;
+				if (reg_addr & LCD_CFG_PHY_ADDR_BIT) {
+					phy->addr = 2;
+					reg_addr &= PHY_REG_MASK;
+				}
+			}
+
+			reg_addr |= phy_page;
+
+			ret_val = phy->ops.write_reg_locked(hw, (u32)reg_addr,
+			                                    reg_data);
+			if (ret_val)
+				goto out;
+		}
+
+		if (hw->mac.type == e1000_pchlan)
+			dev_spec->nvm_lcd_config_enabled = false;
+	}
+
+out:
+	hw->phy.ops.release(hw);
+	return ret_val;
+}
+
+/**
+ *  e1000_k1_gig_workaround_hv - K1 Si workaround
+ *  @hw:   pointer to the HW structure
+ *  @link: link up bool flag
+ *
+ *  If K1 is enabled for 1Gbps, the MAC might stall when transitioning
+ *  from a lower speed.  This workaround disables K1 whenever link is at 1Gig
+ *  If link is down, the function will restore the default K1 setting located
+ *  in the NVM.
+ **/
+static s32 e1000_k1_gig_workaround_hv(struct e1000_hw *hw, bool link)
+{
+	s32 ret_val = E1000_SUCCESS;
+	u16 status_reg = 0;
+	bool k1_enable = hw->dev_spec.ich8lan.nvm_k1_enabled;
+
+	if (hw->mac.type != e1000_pchlan)
+		goto out;
+
+	/* Wrap the whole flow with the sw flag */
+	ret_val = hw->phy.ops.acquire(hw);
+	if (ret_val)
+		goto out;
+
+	/* Disable K1 when link is 1Gbps, otherwise use the NVM setting */
+	if (link) {
+		if (hw->phy.type == e1000_phy_82578) {
+			ret_val = hw->phy.ops.read_reg_locked(hw, BM_CS_STATUS,
+			                                      &status_reg);
+			if (ret_val)
+				goto release;
+
+			status_reg &= BM_CS_STATUS_LINK_UP |
+			              BM_CS_STATUS_RESOLVED |
+			              BM_CS_STATUS_SPEED_MASK;
+
+			if (status_reg == (BM_CS_STATUS_LINK_UP |
+			                   BM_CS_STATUS_RESOLVED |
+			                   BM_CS_STATUS_SPEED_1000))
+				k1_enable = false;
+		}
+
+		if (hw->phy.type == e1000_phy_82577) {
+			ret_val = hw->phy.ops.read_reg_locked(hw, HV_M_STATUS,
+			                                      &status_reg);
+			if (ret_val)
+				goto release;
+
+			status_reg &= HV_M_STATUS_LINK_UP |
+			              HV_M_STATUS_AUTONEG_COMPLETE |
+			              HV_M_STATUS_SPEED_MASK;
+
+			if (status_reg == (HV_M_STATUS_LINK_UP |
+			                   HV_M_STATUS_AUTONEG_COMPLETE |
+			                   HV_M_STATUS_SPEED_1000))
+				k1_enable = false;
+		}
+
+		/* Link stall fix for link up */
+		ret_val = hw->phy.ops.write_reg_locked(hw, PHY_REG(770, 19),
+		                                       0x0100);
+		if (ret_val)
+			goto release;
+
+	} else {
+		/* Link stall fix for link down */
+		ret_val = hw->phy.ops.write_reg_locked(hw, PHY_REG(770, 19),
+		                                       0x4100);
+		if (ret_val)
+			goto release;
+	}
+
+	ret_val = e1000_configure_k1_ich8lan(hw, k1_enable);
+
+release:
+	hw->phy.ops.release(hw);
+out:
+	return ret_val;
+}
+
+/**
+ *  e1000_configure_k1_ich8lan - Configure K1 power state
+ *  @hw: pointer to the HW structure
+ *  @enable: K1 state to configure
+ *
+ *  Configure the K1 power state based on the provided parameter.
+ *  Assumes semaphore already acquired.
+ *
+ *  Success returns 0, Failure returns -E1000_ERR_PHY (-2)
+ **/
+s32 e1000_configure_k1_ich8lan(struct e1000_hw *hw, bool k1_enable)
+{
+	s32 ret_val = E1000_SUCCESS;
+	u32 ctrl_reg = 0;
+	u32 ctrl_ext = 0;
+	u32 reg = 0;
+	u16 kmrn_reg = 0;
+
+	ret_val = e1000_read_kmrn_reg_locked(hw,
+	                                     E1000_KMRNCTRLSTA_K1_CONFIG,
+	                                     &kmrn_reg);
+	if (ret_val)
+		goto out;
+
+	if (k1_enable)
+		kmrn_reg |= E1000_KMRNCTRLSTA_K1_ENABLE;
+	else
+		kmrn_reg &= ~E1000_KMRNCTRLSTA_K1_ENABLE;
+
+	ret_val = e1000_write_kmrn_reg_locked(hw,
+	                                      E1000_KMRNCTRLSTA_K1_CONFIG,
+	                                      kmrn_reg);
+	if (ret_val)
+		goto out;
+
+	udelay(20);
+	ctrl_ext = er32(CTRL_EXT);
+	ctrl_reg = er32(CTRL);
+
+	reg = ctrl_reg & ~(E1000_CTRL_SPD_1000 | E1000_CTRL_SPD_100);
+	reg |= E1000_CTRL_FRCSPD;
+	ew32(CTRL, reg);
+
+	E1000_WRITE_REG(hw,
+	                E1000_CTRL_EXT,
+	                ctrl_ext | E1000_CTRL_EXT_SPD_BYPS);
+	udelay(20);
+	ew32(CTRL, ctrl_reg);
+	ew32(CTRL_EXT, ctrl_ext);
+	udelay(20);
+
+out:
+	return ret_val;
+}
+
+/**
+ *  e1000_oem_bits_config_ich8lan - SW-based LCD Configuration
+ *  @hw:       pointer to the HW structure
+ *  @d0_state: boolean if entering d0 or d3 device state
+ *
+ *  SW will configure Gbe Disable and LPLU based on the NVM. The four bits are
+ *  collectively called OEM bits.  The OEM Write Enable bit and SW Config bit
+ *  in NVM determines whether HW should configure LPLU and Gbe Disable.
+ **/
+s32 e1000_oem_bits_config_ich8lan(struct e1000_hw *hw, bool d0_state)
+{
+	s32 ret_val = 0;
+	u32 mac_reg;
+	u16 oem_reg;
+
+	if (hw->mac.type != e1000_pchlan)
+		return ret_val;
+
+	ret_val = hw->phy.ops.acquire(hw);
+	if (ret_val)
+		return ret_val;
+
+	mac_reg = er32(EXTCNF_CTRL);
+	if (mac_reg & E1000_EXTCNF_CTRL_OEM_WRITE_ENABLE)
+		goto out;
+
+	mac_reg = er32(FEXTNVM);
+	if (!(mac_reg & E1000_FEXTNVM_SW_CONFIG_ICH8M))
+		goto out;
+
+	mac_reg = er32(PHY_CTRL);
+
+	ret_val = hw->phy.ops.read_reg_locked(hw, HV_OEM_BITS, &oem_reg);
+	if (ret_val)
+		goto out;
+
+	oem_reg &= ~(HV_OEM_BITS_GBE_DIS | HV_OEM_BITS_LPLU);
+
+	if (d0_state) {
+		if (mac_reg & E1000_PHY_CTRL_GBE_DISABLE)
+			oem_reg |= HV_OEM_BITS_GBE_DIS;
+
+		if (mac_reg & E1000_PHY_CTRL_D0A_LPLU)
+			oem_reg |= HV_OEM_BITS_LPLU;
+	} else {
+		if (mac_reg & E1000_PHY_CTRL_NOND0A_GBE_DISABLE)
+			oem_reg |= HV_OEM_BITS_GBE_DIS;
+
+		if (mac_reg & E1000_PHY_CTRL_NOND0A_LPLU)
+			oem_reg |= HV_OEM_BITS_LPLU;
+	}
+	/* Restart auto-neg to activate the bits */
+	oem_reg |= HV_OEM_BITS_RESTART_AN;
+	ret_val = hw->phy.ops.write_reg_locked(hw, HV_OEM_BITS, oem_reg);
+
+out:
+	hw->phy.ops.release(hw);
+
+	return ret_val;
+}
+
+
+/**
  *  e1000_hv_phy_workarounds_ich8lan - A series of Phy workarounds to be
  *  done after every PHY reset.
  **/
@@ -685,7 +1054,7 @@ static s32 e1000_hv_phy_workarounds_ich8lan(struct e1000_hw *hw)
 	s32 ret_val = E1000_SUCCESS;
 
 	if (hw->mac.type != e1000_pchlan)
-		return ret_val;
+		goto out;
 
 	if (((hw->phy.type == e1000_phy_82577) &&
 	     ((hw->phy.revision == 1) || (hw->phy.revision == 2))) ||
@@ -693,12 +1062,12 @@ static s32 e1000_hv_phy_workarounds_ich8lan(struct e1000_hw *hw)
 		/* Disable generation of early preamble */
 		ret_val = e1e_wphy(hw, PHY_REG(769, 25), 0x4431);
 		if (ret_val)
-			return ret_val;
+			goto out;
 
 		/* Preamble tuning for SSC */
 		ret_val = e1e_wphy(hw, PHY_REG(770, 16), 0xA204);
 		if (ret_val)
-			return ret_val;
+			goto out;
 	}
 
 	if (hw->phy.type == e1000_phy_82578) {
@@ -716,11 +1085,21 @@ static s32 e1000_hv_phy_workarounds_ich8lan(struct e1000_hw *hw)
 	/* Select page 0 */
 	ret_val = hw->phy.ops.acquire(hw);
 	if (ret_val)
-		return ret_val;
+		goto out;
+
 	hw->phy.addr = 1;
-	e1000e_write_phy_reg_mdic(hw, IGP01E1000_PHY_PAGE_SELECT, 0);
+	ret_val = e1000e_write_phy_reg_mdic(hw, IGP01E1000_PHY_PAGE_SELECT, 0);
+	if (ret_val)
+		goto out;
 	hw->phy.ops.release(hw);
 
+	/*
+	 * Configure the K1 Si workaround during phy reset assuming there is
+	 * link so that it disables K1 if link is in 1Gbps.
+	 */
+	ret_val = e1000_k1_gig_workaround_hv(hw, true);
+
+out:
 	return ret_val;
 }
 
@@ -766,10 +1145,8 @@ static void e1000_lan_init_done_ich8lan(struct e1000_hw *hw)
  **/
 static s32 e1000_phy_hw_reset_ich8lan(struct e1000_hw *hw)
 {
-	struct e1000_phy_info *phy = &hw->phy;
-	u32 i, data, cnf_size, cnf_base_addr, sw_cfg_mask;
-	s32 ret_val;
-	u16 word_addr, reg_data, reg_addr, phy_page = 0;
+	s32 ret_val = E1000_SUCCESS;
+	u16 reg;
 
 	ret_val = e1000e_phy_hw_reset_generic(hw);
 	if (ret_val)
@@ -784,74 +1161,18 @@ static s32 e1000_phy_hw_reset_ich8lan(struct e1000_hw *hw)
 			goto out;
 	}
 
-	/*
-	 * Initialize the PHY from the NVM on ICH platforms.  This
-	 * is needed due to an issue where the NVM configuration is
-	 * not properly autoloaded after power transitions.
-	 * Therefore, after each PHY reset, we will load the
-	 * configuration data out of the NVM manually.
-	 */
-	if (hw->mac.type == e1000_ich8lan && phy->type == e1000_phy_igp_3) {
-		/* Check if SW needs configure the PHY */
-		if ((hw->device_id == E1000_DEV_ID_ICH8_IGP_M_AMT) ||
-		    (hw->device_id == E1000_DEV_ID_ICH8_IGP_M))
-			sw_cfg_mask = E1000_FEXTNVM_SW_CONFIG_ICH8M;
-		else
-			sw_cfg_mask = E1000_FEXTNVM_SW_CONFIG;
+	/* Dummy read to clear the phy wakeup bit after lcd reset */
+	if (hw->mac.type == e1000_pchlan)
+		e1e_rphy(hw, BM_WUC, &reg);
 
-		data = er32(FEXTNVM);
-		if (!(data & sw_cfg_mask))
-			goto out;
+	/* Configure the LCD with the extended configuration region in NVM */
+	ret_val = e1000_sw_lcd_config_ich8lan(hw);
+	if (ret_val)
+		goto out;
 
-		/* Wait for basic configuration completes before proceeding */
-		e1000_lan_init_done_ich8lan(hw);
-
-		/*
-		 * Make sure HW does not configure LCD from PHY
-		 * extended configuration before SW configuration
-		 */
-		data = er32(EXTCNF_CTRL);
-		if (data & E1000_EXTCNF_CTRL_LCD_WRITE_ENABLE)
-			goto out;
-
-		cnf_size = er32(EXTCNF_SIZE);
-		cnf_size &= E1000_EXTCNF_SIZE_EXT_PCIE_LENGTH_MASK;
-		cnf_size >>= E1000_EXTCNF_SIZE_EXT_PCIE_LENGTH_SHIFT;
-		if (!cnf_size)
-			goto out;
-
-		cnf_base_addr = data & E1000_EXTCNF_CTRL_EXT_CNF_POINTER_MASK;
-		cnf_base_addr >>= E1000_EXTCNF_CTRL_EXT_CNF_POINTER_SHIFT;
-
-		/* Configure LCD from extended configuration region. */
-
-		/* cnf_base_addr is in DWORD */
-		word_addr = (u16)(cnf_base_addr << 1);
-
-		for (i = 0; i < cnf_size; i++) {
-			ret_val = e1000_read_nvm(hw, (word_addr + i * 2), 1,
-			                           &reg_data);
-			if (ret_val)
-				goto out;
-
-			ret_val = e1000_read_nvm(hw, (word_addr + i * 2 + 1),
-			                           1, &reg_addr);
-			if (ret_val)
-				goto out;
-
-			/* Save off the PHY page for future writes. */
-			if (reg_addr == IGP01E1000_PHY_PAGE_SELECT) {
-				phy_page = reg_data;
-				continue;
-			}
-
-			reg_addr |= phy_page;
-
-			ret_val = e1e_wphy(hw, (u32)reg_addr, reg_data);
-			if (ret_val)
-				goto out;
-		}
-	}
+	/* Configure the LCD with the OEM bits in NVM */
+	if (hw->mac.type == e1000_pchlan)
+		ret_val = e1000_oem_bits_config_ich8lan(hw, true);
 
 out:
 	return ret_val;
@@ -936,6 +1257,38 @@ static s32 e1000_get_phy_info_ife_ich8lan(struct e1000_hw *hw)
 	phy->cable_length = E1000_CABLE_LENGTH_UNDEFINED;
 	phy->local_rx = e1000_1000t_rx_status_undefined;
 	phy->remote_rx = e1000_1000t_rx_status_undefined;
+
+out:
+	return ret_val;
+}
+
+/**
+ *  e1000_set_lplu_state_pchlan - Set Low Power Link Up state
+ *  @hw: pointer to the HW structure
+ *  @active: true to enable LPLU, false to disable
+ *
+ *  Sets the LPLU state according to the active flag.  For PCH, if OEM write
+ *  bit are disabled in the NVM, writing the LPLU bits in the MAC will not set
+ *  the phy speed. This function will manually set the LPLU bit and restart
+ *  auto-neg as hw would do. D3 and D0 LPLU will call the same function
+ *  since it configures the same bit.
+ **/
+static s32 e1000_set_lplu_state_pchlan(struct e1000_hw *hw, bool active)
+{
+	s32 ret_val = E1000_SUCCESS;
+	u16 oem_reg;
+
+	ret_val = e1e_rphy(hw, HV_OEM_BITS, &oem_reg);
+	if (ret_val)
+		goto out;
+
+	if (active)
+		oem_reg |= HV_OEM_BITS_LPLU;
+	else
+		oem_reg &= ~HV_OEM_BITS_LPLU;
+
+	oem_reg |= HV_OEM_BITS_RESTART_AN;
+	ret_val = e1e_wphy(hw, HV_OEM_BITS, oem_reg);
 
 out:
 	return ret_val;
@@ -1174,7 +1527,7 @@ static s32 e1000_valid_nvm_bank_detect_ich8lan(struct e1000_hw *hw, u32 *bank)
 		if (ret_val)
 			goto out;
 		if ((sig_byte & E1000_ICH_NVM_VALID_SIG_MASK) ==
-			E1000_ICH_NVM_SIG_VALUE) {
+		    E1000_ICH_NVM_SIG_VALUE) {
 			*bank = 0;
 			goto out;
 		}
@@ -1182,11 +1535,11 @@ static s32 e1000_valid_nvm_bank_detect_ich8lan(struct e1000_hw *hw, u32 *bank)
 		/* Check bank 1 */
 		ret_val = e1000_read_flash_byte_ich8lan(hw, act_offset +
 		                                        bank1_offset,
-					                &sig_byte);
+		                                        &sig_byte);
 		if (ret_val)
 			goto out;
 		if ((sig_byte & E1000_ICH_NVM_VALID_SIG_MASK) ==
-			E1000_ICH_NVM_SIG_VALUE) {
+		    E1000_ICH_NVM_SIG_VALUE) {
 			*bank = 1;
 			goto out;
 		}
@@ -1225,17 +1578,18 @@ static s32 e1000_read_nvm_ich8lan(struct e1000_hw *hw, u16 offset, u16 words,
 		goto out;
 	}
 
-	ret_val = nvm->ops.acquire(hw);
-	if (ret_val)
-		goto out;
+	nvm->ops.acquire(hw);
 
 	ret_val = e1000_valid_nvm_bank_detect_ich8lan(hw, &bank);
-	if (ret_val != E1000_SUCCESS)
-		goto release;
+	if (ret_val != E1000_SUCCESS) {
+		e_dbg("Could not detect valid bank, assuming bank 0\n");
+		bank = 0;
+	}
 
 	act_offset = (bank) ? nvm->flash_bank_size : 0;
 	act_offset += offset;
 
+	ret_val = E1000_SUCCESS;
 	for (i = 0; i < words; i++) {
 		if ((dev_spec->shadow_ram) &&
 		    (dev_spec->shadow_ram[offset+i].modified)) {
@@ -1250,7 +1604,6 @@ static s32 e1000_read_nvm_ich8lan(struct e1000_hw *hw, u16 offset, u16 words,
 		}
 	}
 
-release:
 	nvm->ops.release(hw);
 
 out:
@@ -1525,9 +1878,7 @@ static s32 e1000_write_nvm_ich8lan(struct e1000_hw *hw, u16 offset, u16 words,
 		goto out;
 	}
 
-	ret_val = nvm->ops.acquire(hw);
-	if (ret_val)
-		goto out;
+	nvm->ops.acquire(hw);
 
 	for (i = 0; i < words; i++) {
 		dev_spec->shadow_ram[offset+i].modified = true;
@@ -1566,9 +1917,7 @@ static s32 e1000_update_nvm_checksum_ich8lan(struct e1000_hw *hw)
 	if (nvm->type != e1000_nvm_flash_sw)
 		goto out;
 
-	ret_val = nvm->ops.acquire(hw);
-	if (ret_val)
-		goto out;
+	nvm->ops.acquire(hw);
 
 	/*
 	 * We're writing to the opposite bank so if we're on bank 1,
@@ -1577,8 +1926,8 @@ static s32 e1000_update_nvm_checksum_ich8lan(struct e1000_hw *hw)
 	 */
 	ret_val =  e1000_valid_nvm_bank_detect_ich8lan(hw, &bank);
 	if (ret_val != E1000_SUCCESS) {
-		nvm->ops.release(hw);
-		goto out;
+		e_dbg("Could not detect valid bank, assuming bank 0\n");
+		bank = 0;
 	}
 
 	if (bank == 0) {
@@ -1667,6 +2016,7 @@ static s32 e1000_update_nvm_checksum_ich8lan(struct e1000_hw *hw)
 		nvm->ops.release(hw);
 		goto out;
 	}
+
 	data &= 0xBFFF;
 	ret_val = e1000_retry_write_flash_byte_ich8lan(hw,
 	                                               act_offset * 2 + 1,
@@ -1925,13 +2275,8 @@ static s32 e1000_erase_flash_bank_ich8lan(struct e1000_hw *hw, u32 bank)
 		iteration = 1;
 		break;
 	case 2:
-		if (hw->mac.type == e1000_ich9lan) {
-			sector_size = ICH_FLASH_SEG_SIZE_8K;
-			iteration = flash_bank_size / ICH_FLASH_SEG_SIZE_8K;
-		} else {
-			ret_val = -E1000_ERR_NVM;
-			goto out;
-		}
+		sector_size = ICH_FLASH_SEG_SIZE_8K;
+		iteration = 1;
 		break;
 	case 3:
 		sector_size = ICH_FLASH_SEG_SIZE_64K;
@@ -1944,7 +2289,7 @@ static s32 e1000_erase_flash_bank_ich8lan(struct e1000_hw *hw, u32 bank)
 
 	/* Start with the base address, then add the sector offset. */
 	flash_linear_addr = hw->nvm.flash_base_addr;
-	flash_linear_addr += (bank) ? (sector_size * iteration) : 0;
+	flash_linear_addr += (bank) ? flash_bank_size : 0;
 
 	for (j = 0; j < iteration ; j++) {
 		do {
@@ -2131,6 +2476,8 @@ static s32 e1000_get_bus_info_ich8lan(struct e1000_hw *hw)
  **/
 static s32 e1000_reset_hw_ich8lan(struct e1000_hw *hw)
 {
+	struct e1000_dev_spec_ich8lan *dev_spec = &hw->dev_spec.ich8lan;
+	u16 reg;
 	u32 ctrl, icr, kab;
 	s32 ret_val;
 
@@ -2164,6 +2511,18 @@ static s32 e1000_reset_hw_ich8lan(struct e1000_hw *hw)
 		ew32(PBS, E1000_PBS_16K);
 	}
 
+	if (hw->mac.type == e1000_pchlan) {
+		/* Save the NVM K1 bit setting*/
+		ret_val = e1000_read_nvm(hw, E1000_NVM_K1_CONFIG, 1, &reg);
+		if (ret_val)
+			return ret_val;
+
+		if (reg & E1000_NVM_K1_ENABLE)
+			dev_spec->nvm_k1_enabled = true;
+		else
+			dev_spec->nvm_k1_enabled = false;
+	}
+
 	ctrl = er32(CTRL);
 
 	if (!e1000_check_reset_block(hw) && !hw->phy.reset_disable) {
@@ -2195,14 +2554,7 @@ static s32 e1000_reset_hw_ich8lan(struct e1000_hw *hw)
 	if (hw->mac.type >= e1000_ich10lan) {
 		e1000_lan_init_done_ich8lan(hw);
 	} else {
-		if (!ret_val) {
-		/* release the swflag because it is not reset by
-		 * hardware reset
-		 */
-		e1000_release_swflag_ich8lan(hw);
-	}
-
-	ret_val = e1000e_get_auto_rd_done(hw);
+		ret_val = e1000e_get_auto_rd_done(hw);
 		if (ret_val) {
 			/*
 			 * When auto config read does not complete, do not
@@ -2212,7 +2564,19 @@ static s32 e1000_reset_hw_ich8lan(struct e1000_hw *hw)
 			e_dbg("Auto Read Done did not complete\n");
 		}
 	}
+	/* Dummy read to clear the phy wakeup bit after lcd reset */
+	if (hw->mac.type == e1000_pchlan)
+		e1e_rphy(hw, BM_WUC, &reg);
 
+	ret_val = e1000_sw_lcd_config_ich8lan(hw);
+	if (ret_val)
+		goto out;
+
+	if (hw->mac.type == e1000_pchlan) {
+		ret_val = e1000_oem_bits_config_ich8lan(hw, true);
+		if (ret_val)
+			goto out;
+	}
 	/*
 	 * For PCH, this write will make sure that any noise
 	 * will be detected as a CRC error and be dropped rather than show up
@@ -2231,6 +2595,7 @@ static s32 e1000_reset_hw_ich8lan(struct e1000_hw *hw)
 	if (hw->mac.type == e1000_pchlan)
 		ret_val = e1000_hv_phy_workarounds_ich8lan(hw);
 
+out:
 	return ret_val;
 }
 
@@ -2543,14 +2908,6 @@ static s32 e1000_get_link_up_info_ich8lan(struct e1000_hw *hw, u16 *speed,
 	if (ret_val)
 		goto out;
 
-	if ((hw->mac.type == e1000_pchlan) && (*speed == SPEED_1000)) {
-		ret_val = e1000e_write_kmrn_reg(hw,
-						  E1000_KMRNCTRLSTA_K1_CONFIG,
-						  E1000_KMRNCTRLSTA_K1_DISABLE);
-		if (ret_val)
-			goto out;
-	}
-
 	if ((hw->mac.type == e1000_ich8lan) &&
 	    (hw->phy.type == e1000_phy_igp_3) &&
 	    (*speed == SPEED_1000)) {
@@ -2777,9 +3134,8 @@ void e1000e_disable_gig_wol_ich8lan(struct e1000_hw *hw)
 		            E1000_PHY_CTRL_GBE_DISABLE;
 		ew32(PHY_CTRL, phy_ctrl);
 
-		/* Workaround SWFLAG unexpectedly set during S0->Sx */
 		if (hw->mac.type == e1000_pchlan)
-			udelay(500);
+			e1000_phy_hw_reset_ich8lan(hw);
 	default:
 		break;
 	}

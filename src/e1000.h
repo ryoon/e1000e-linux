@@ -332,6 +332,7 @@ struct e1000_adapter {
 	struct work_struct downshift_task;
 	struct work_struct update_phy_task;
 	struct work_struct led_blink_task;
+	struct work_struct print_hang_task;
 	u32 *config_space;
 };
 

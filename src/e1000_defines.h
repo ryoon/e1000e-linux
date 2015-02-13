@@ -131,12 +131,12 @@
 #define E1000_CTRL_EXT_SDP5_DATA 0x00000020 /* Value of SW Definable Pin 5 */
 #define E1000_CTRL_EXT_PHY_INT   E1000_CTRL_EXT_SDP5_DATA
 #define E1000_CTRL_EXT_SDP6_DATA 0x00000040 /* Value of SW Definable Pin 6 */
-#define E1000_CTRL_EXT_SDP7_DATA 0x00000080 /* Value of SW Definable Pin 7 */
+#define E1000_CTRL_EXT_SDP3_DATA 0x00000080 /* Value of SW Definable Pin 3 */
 /* SDP 4/5 (bits 8,9) are reserved in >= 82575 */
 #define E1000_CTRL_EXT_SDP4_DIR  0x00000100 /* Direction of SDP4 0=in 1=out */
 #define E1000_CTRL_EXT_SDP5_DIR  0x00000200 /* Direction of SDP5 0=in 1=out */
 #define E1000_CTRL_EXT_SDP6_DIR  0x00000400 /* Direction of SDP6 0=in 1=out */
-#define E1000_CTRL_EXT_SDP7_DIR  0x00000800 /* Direction of SDP7 0=in 1=out */
+#define E1000_CTRL_EXT_SDP3_DIR  0x00000800 /* Direction of SDP3 0=in 1=out */
 #define E1000_CTRL_EXT_ASDCHK    0x00001000 /* Initiate an ASD sequence */
 #define E1000_CTRL_EXT_EE_RST    0x00002000 /* Reinitialize from EEPROM */
 #define E1000_CTRL_EXT_IPS       0x00004000 /* Invert Power State */
@@ -671,6 +671,7 @@
 /* Extended Configuration Control and Size */
 #define E1000_EXTCNF_CTRL_MDIO_SW_OWNERSHIP      0x00000020
 #define E1000_EXTCNF_CTRL_LCD_WRITE_ENABLE       0x00000001
+#define E1000_EXTCNF_CTRL_OEM_WRITE_ENABLE       0x00000008
 #define E1000_EXTCNF_CTRL_SWFLAG                 0x00000020
 #define E1000_EXTCNF_SIZE_EXT_PCIE_LENGTH_MASK   0x00FF0000
 #define E1000_EXTCNF_SIZE_EXT_PCIE_LENGTH_SHIFT          16

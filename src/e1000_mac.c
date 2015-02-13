@@ -1848,7 +1848,7 @@ out:
  *  Verify that when not using auto-negotiation that MDI/MDIx is correctly
  *  set, which is forced to MDI mode only.
  **/
-s32 e1000_validate_mdi_setting_generic(struct e1000_hw *hw)
+static s32 e1000_validate_mdi_setting_generic(struct e1000_hw *hw)
 {
 	s32 ret_val = E1000_SUCCESS;
 

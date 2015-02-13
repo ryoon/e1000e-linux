@@ -237,10 +237,6 @@
 #define E1000_ICTXQMTC 0x0411C  /* Interrupt Cause Tx Queue Min Thresh Count */
 #define E1000_ICRXDMTC 0x04120  /* Interrupt Cause Rx Desc Min Thresh Count */
 #define E1000_ICRXOC   0x04124  /* Interrupt Cause Receiver Overrun Count */
-/*
- * The CRC offset register is undocumented because it is for future use and
- * may change in the future.
- */
 #define E1000_CRC_OFFSET 0x05F50  /* CRC Offset register */
 
 #define E1000_PCS_CFG0    0x04200  /* PCS Configuration 0 - RW */
