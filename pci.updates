@@ -80,6 +80,8 @@
 	10f5  82567LM Gigabit Network Connection
 	10f6  82574L Gigabit Network Connection
 	1501  82567V-3 Gigabit Network Connection
+	1502  82579LM Gigabit Network Connection
+	1503  82579V Gigabit Network Connection
 	150c  82583V Gigabit Network Connection
 	1525  82567V-4 Gigabit Network Connection
 	294c  82566DC-2 Gigabit Network Connection

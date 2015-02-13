@@ -41,26 +41,16 @@
 
 struct e1000_info;
 
-#define e_printk(level, adapter, format, arg...) \
-	printk(level "%s: %s: " format, pci_name(adapter->pdev), \
-	       (strchr(adapter->netdev->name, '%') ? "" : \
-	        adapter->netdev->name), ## arg)
-
-#ifdef DEBUG
 #define e_dbg(format, arg...) \
-	e_printk(KERN_DEBUG, hw->adapter, format, ## arg)
-#else
-#define e_dbg(format, arg...) do { (void)(hw); } while (0)
-#endif
-
+	netdev_dbg(hw->adapter->netdev, format, ## arg)
 #define e_err(format, arg...) \
-	e_printk(KERN_ERR, adapter, format, ## arg)
+	netdev_err(adapter->netdev, format, ## arg)
 #define e_info(format, arg...) \
-	e_printk(KERN_INFO, adapter, format, ## arg)
+	netdev_info(adapter->netdev, format, ## arg)
 #define e_warn(format, arg...) \
-	e_printk(KERN_WARNING, adapter, format, ## arg)
+	netdev_warn(adapter->netdev, format, ## arg)
 #define e_notice(format, arg...) \
-	e_printk(KERN_NOTICE, adapter, format, ## arg)
+	netdev_notice(adapter->netdev, format, ## arg)
 
 
 #ifdef CONFIG_E1000E_MSIX
@@ -105,6 +95,9 @@ struct e1000_info;
 
 #define DEFAULT_JUMBO			9234
 
+/* Time to wait before putting the device into D3 if there's no link (in ms). */
+#define LINK_TIMEOUT		100
+
 enum e1000_boards {
 	board_82571,
 	board_82572,
@@ -116,6 +109,7 @@ enum e1000_boards {
 	board_ich9lan,
 	board_ich10lan,
 	board_pchlan,
+	board_pch2lan,
 };
 
 struct e1000_queue_stats {
@@ -141,6 +135,8 @@ struct e1000_buffer {
 			unsigned long time_stamp;
 			u16 length;
 			u16 next_to_watch;
+			unsigned int segs;
+			unsigned int bytecount;
 			u16 mapped_as_page;
 		};
 		/* Rx */
@@ -338,6 +334,8 @@ struct e1000_adapter {
 	struct work_struct led_blink_task;
 	struct work_struct print_hang_task;
 	u32 *config_space;
+
+	bool idle_check;
 };
 
 struct e1000_info {
@@ -390,6 +388,8 @@ struct e1000_info {
 #define FLAG2_HAS_PHY_WAKEUP              (1 << 1)
 #define FLAG2_IS_DISCARDING               (1 << 2)
 #define FLAG2_DISABLE_ASPM_L1             (1 << 3)
+#define FLAG2_HAS_PHY_STATS               (1 << 4)
+#define FLAG2_HAS_EEE                     (1 << 5)
 
 #define E1000_RX_DESC_PS(R, i)	    \
 	(&(((union e1000_rx_desc_packet_split *)((R).desc))[i]))
@@ -430,7 +430,6 @@ extern int e1000e_setup_tx_resources(struct e1000_adapter *adapter);
 extern void e1000e_free_rx_resources(struct e1000_adapter *adapter);
 extern void e1000e_free_tx_resources(struct e1000_adapter *adapter);
 extern void e1000e_update_stats(struct e1000_adapter *adapter);
-extern bool e1000e_has_link(struct e1000_adapter *adapter);
 #ifdef CONFIG_E1000E_MSIX
 extern void e1000e_set_interrupt_capability(struct e1000_adapter *adapter);
 extern void e1000e_reset_interrupt_capability(struct e1000_adapter *adapter);

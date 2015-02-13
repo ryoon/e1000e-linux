@@ -32,6 +32,7 @@
 #ifdef SIOCETHTOOL
 #include <linux/ethtool.h>
 #include <linux/pci.h>
+#include <linux/slab.h>
 #include <linux/delay.h>
 
 #include "e1000.h"
@@ -131,7 +132,6 @@ static int e1000_get_settings(struct net_device *netdev,
 {
 	struct e1000_adapter *adapter = netdev_priv(netdev);
 	struct e1000_hw *hw = &adapter->hw;
-	u32 status;
 
 	if (hw->phy.media_type == e1000_media_type_copper) {
 
@@ -169,22 +169,29 @@ static int e1000_get_settings(struct net_device *netdev,
 		ecmd->transceiver = XCVR_EXTERNAL;
 	}
 
-	status = er32(STATUS);
-	if (status & E1000_STATUS_LU) {
-		if (status & E1000_STATUS_SPEED_1000)
-			ecmd->speed = 1000;
-		else if (status & E1000_STATUS_SPEED_100)
-			ecmd->speed = 100;
-		else
-			ecmd->speed = 10;
+	ecmd->speed = -1;
+	ecmd->duplex = -1;
 
-		if (status & E1000_STATUS_FD)
-			ecmd->duplex = DUPLEX_FULL;
-		else
-			ecmd->duplex = DUPLEX_HALF;
+	if (netif_running(netdev)) {
+		if (netif_carrier_ok(netdev)) {
+			ecmd->speed = adapter->link_speed;
+			ecmd->duplex = adapter->link_duplex - 1;
+		}
 	} else {
-		ecmd->speed = -1;
-		ecmd->duplex = -1;
+		u32 status = er32(STATUS);
+		if (status & E1000_STATUS_LU) {
+			if (status & E1000_STATUS_SPEED_1000)
+				ecmd->speed = 1000;
+			else if (status & E1000_STATUS_SPEED_100)
+				ecmd->speed = 100;
+			else
+				ecmd->speed = 10;
+
+			if (status & E1000_STATUS_FD)
+				ecmd->duplex = DUPLEX_FULL;
+			else
+				ecmd->duplex = DUPLEX_HALF;
+		}
 	}
 
 	ecmd->autoneg = ((hw->phy.media_type == e1000_media_type_fiber) ||
@@ -193,7 +200,7 @@ static int e1000_get_settings(struct net_device *netdev,
 #ifdef ETH_TP_MDI_X
 	/* MDI-X => 2; MDI =>1; Invalid =>0 */
 	if ((hw->phy.media_type == e1000_media_type_copper) &&
-	    !hw->mac.get_link_status)
+	    netif_carrier_ok(netdev))
 		ecmd->eth_tp_mdix = hw->phy.is_mdix ? ETH_TP_MDI_X :
 		                                      ETH_TP_MDI;
 	else
@@ -206,19 +213,15 @@ static int e1000_get_settings(struct net_device *netdev,
 static u32 e1000_get_link(struct net_device *netdev)
 {
 	struct e1000_adapter *adapter = netdev_priv(netdev);
-	struct e1000_mac_info *mac = &adapter->hw.mac;
+	struct e1000_hw *hw = &adapter->hw;
 
 	/*
-	 * If the link is not reported up to netdev, interrupts are disabled,
-	 * and so the physical link state may have changed since we last
-	 * looked. Set get_link_status to make sure that the true link
-	 * state is interrogated, rather than pulling a cached and possibly
-	 * stale link state from the driver.
+	 * Avoid touching hardware registers when possible, otherwise
+	 * link negotiation can get messed up when user-level scripts
+	 * are rapidly polling the driver to see if link is up.
 	 */
-	if (!netif_carrier_ok(netdev))
-		mac->get_link_status = 1;
-
-	return e1000e_has_link(adapter);
+	return netif_running(netdev) ? netif_carrier_ok(netdev) :
+	    !!(er32(STATUS) & E1000_STATUS_LU);
 }
 
 static int e1000_set_spd_dplx(struct e1000_adapter *adapter, u16 spddplx)
@@ -466,7 +469,6 @@ static int e1000_set_tso(struct net_device *netdev, u32 data)
 #ifndef HAVE_NETDEV_VLAN_FEATURES
 tso_out:
 #endif /* HAVE_NETDEV_VLAN_FEATURES */
-	e_info("TSO is %s\n", data ? "Enabled" : "Disabled");
 	adapter->flags |= FLAG_TSO_FORCE;
 	return 0;
 }
@@ -933,6 +935,7 @@ static int e1000_reg_test(struct e1000_adapter *adapter, u64 *data)
 	switch (mac->type) {
 	case e1000_ich10lan:
 	case e1000_pchlan:
+	case e1000_pch2lan:
 		mask |= (1 << 18);
 		break;
 	default:
@@ -1135,10 +1138,10 @@ static void e1000_free_desc_rings(struct e1000_adapter *adapter)
 	if (tx_ring->desc && tx_ring->buffer_info) {
 		for (i = 0; i < tx_ring->count; i++) {
 			if (tx_ring->buffer_info[i].dma)
-				pci_unmap_single(pdev,
+				dma_unmap_single(pci_dev_to_dev(pdev),
 					tx_ring->buffer_info[i].dma,
 					tx_ring->buffer_info[i].length,
-					PCI_DMA_TODEVICE);
+					DMA_TO_DEVICE);
 			if (tx_ring->buffer_info[i].skb)
 				dev_kfree_skb(tx_ring->buffer_info[i].skb);
 		}
@@ -1147,21 +1150,21 @@ static void e1000_free_desc_rings(struct e1000_adapter *adapter)
 	if (rx_ring->desc && rx_ring->buffer_info) {
 		for (i = 0; i < rx_ring->count; i++) {
 			if (rx_ring->buffer_info[i].dma)
-				pci_unmap_single(pdev,
+				dma_unmap_single(pci_dev_to_dev(pdev),
 					rx_ring->buffer_info[i].dma,
-					2048, PCI_DMA_FROMDEVICE);
+					2048, DMA_FROM_DEVICE);
 			if (rx_ring->buffer_info[i].skb)
 				dev_kfree_skb(rx_ring->buffer_info[i].skb);
 		}
 	}
 
 	if (tx_ring->desc) {
-		dma_free_coherent(&pdev->dev, tx_ring->size, tx_ring->desc,
+		dma_free_coherent(pci_dev_to_dev(pdev), tx_ring->size, tx_ring->desc,
 				  tx_ring->dma);
 		tx_ring->desc = NULL;
 	}
 	if (rx_ring->desc) {
-		dma_free_coherent(&pdev->dev, rx_ring->size, rx_ring->desc,
+		dma_free_coherent(pci_dev_to_dev(pdev), rx_ring->size, rx_ring->desc,
 				  rx_ring->dma);
 		rx_ring->desc = NULL;
 	}
@@ -1197,7 +1200,7 @@ static int e1000_setup_desc_rings(struct e1000_adapter *adapter)
 
 	tx_ring->size = tx_ring->count * sizeof(struct e1000_tx_desc);
 	tx_ring->size = ALIGN(tx_ring->size, 4096);
-	tx_ring->desc = dma_alloc_coherent(&pdev->dev, tx_ring->size,
+	tx_ring->desc = dma_alloc_coherent(pci_dev_to_dev(pdev), tx_ring->size,
 					   &tx_ring->dma, GFP_KERNEL);
 	if (!tx_ring->desc) {
 		ret_val = 2;
@@ -1229,9 +1232,10 @@ static int e1000_setup_desc_rings(struct e1000_adapter *adapter)
 		tx_ring->buffer_info[i].skb = skb;
 		tx_ring->buffer_info[i].length = skb->len;
 		tx_ring->buffer_info[i].dma =
-			pci_map_single(pdev, skb->data, skb->len,
-				       PCI_DMA_TODEVICE);
-		if (pci_dma_mapping_error(pdev, tx_ring->buffer_info[i].dma)) {
+			dma_map_single(pci_dev_to_dev(pdev), skb->data, skb->len,
+				       DMA_TO_DEVICE);
+		if (dma_mapping_error(pci_dev_to_dev(pdev),
+				      tx_ring->buffer_info[i].dma)) {
 			ret_val = 4;
 			goto err_nomem;
 		}
@@ -1257,7 +1261,7 @@ static int e1000_setup_desc_rings(struct e1000_adapter *adapter)
 	}
 
 	rx_ring->size = rx_ring->count * sizeof(struct e1000_rx_desc);
-	rx_ring->desc = dma_alloc_coherent(&pdev->dev, rx_ring->size,
+	rx_ring->desc = dma_alloc_coherent(pci_dev_to_dev(pdev), rx_ring->size,
 					   &rx_ring->dma, GFP_KERNEL);
 	if (!rx_ring->desc) {
 		ret_val = 6;
@@ -1292,9 +1296,10 @@ static int e1000_setup_desc_rings(struct e1000_adapter *adapter)
 		skb_reserve(skb, NET_IP_ALIGN);
 		rx_ring->buffer_info[i].skb = skb;
 		rx_ring->buffer_info[i].dma =
-			pci_map_single(pdev, skb->data, 2048,
-				       PCI_DMA_FROMDEVICE);
-		if (pci_dma_mapping_error(pdev, rx_ring->buffer_info[i].dma)) {
+			dma_map_single(pci_dev_to_dev(pdev), skb->data, 2048,
+				       DMA_FROM_DEVICE);
+		if (dma_mapping_error(pci_dev_to_dev(pdev),
+				      rx_ring->buffer_info[i].dma)) {
 			ret_val = 8;
 			goto err_nomem;
 		}
@@ -1385,6 +1390,16 @@ static int e1000_integrated_phy_loopback(struct e1000_adapter *adapter)
 	case e1000_phy_82578:
 		/* Workaround: K1 must be disabled for stable 1Gbps operation */
 		e1000_configure_k1_ich8lan(hw, false);
+		break;
+	case e1000_phy_82579:
+		/* Disable PHY energy detect power down */
+		e1e_rphy(hw, PHY_REG(0, 21), &phy_reg);
+		e1e_wphy(hw, PHY_REG(0, 21), phy_reg & ~(1 << 3));
+		/* Disable full chip energy detect */
+		e1e_rphy(hw, PHY_REG(776, 18), &phy_reg);
+		e1e_wphy(hw, PHY_REG(776, 18), phy_reg | 1);
+		/* Enable loopback on the PHY */
+		e1e_wphy(hw, I82577_PHY_LBK_CTRL, 0x8001);
 		break;
 	default:
 		break;
@@ -1632,10 +1647,10 @@ static int e1000_run_loopback_test(struct e1000_adapter *adapter)
 		for (i = 0; i < 64; i++) { /* send the packets */
 			e1000_create_lbtest_frame(tx_ring->buffer_info[k].skb,
 						  1024);
-			pci_dma_sync_single_for_device(pdev,
+			dma_sync_single_for_device(pci_dev_to_dev(pdev),
 					tx_ring->buffer_info[k].dma,
 					tx_ring->buffer_info[k].length,
-					PCI_DMA_TODEVICE);
+					DMA_TO_DEVICE);
 			k++;
 			if (k == tx_ring->count)
 				k = 0;
@@ -1645,9 +1660,9 @@ static int e1000_run_loopback_test(struct e1000_adapter *adapter)
 		time = jiffies; /* set the start time for the receive */
 		good_cnt = 0;
 		do { /* receive the sent packets */
-			pci_dma_sync_single_for_cpu(pdev,
+			dma_sync_single_for_cpu(pci_dev_to_dev(pdev),
 					rx_ring->buffer_info[l].dma, 2048,
-					PCI_DMA_FROMDEVICE);
+					DMA_FROM_DEVICE);
 
 			ret_val = e1000_check_lbtest_frame(
 					rx_ring->buffer_info[l].skb, 1024);
@@ -1729,10 +1744,13 @@ static int e1000_link_test(struct e1000_adapter *adapter, u64 *data)
 		if (hw->mac.autoneg)
 			msleep(4000);
 
-		if (!(er32(STATUS) &
-		      E1000_STATUS_LU))
+		if (!(er32(STATUS) & E1000_STATUS_LU))
 			*data = 1;
 	}
+
+	if (*data)
+		e_info("Link failed or taking longer than expected.\n");
+
 	return *data;
 }
 
@@ -1955,6 +1973,7 @@ static int e1000_phys_id(struct net_device *netdev, u32 data)
 
 	if ((hw->phy.type == e1000_phy_ife) ||
 	    (hw->mac.type == e1000_pchlan) ||
+	    (hw->mac.type == e1000_pch2lan) ||
 	    (hw->mac.type == e1000_82583) ||
 	    (hw->mac.type == e1000_82574)) {
 		INIT_WORK(&adapter->led_blink_task, e1000e_led_blink_task);
@@ -1986,7 +2005,7 @@ static int e1000_get_coalesce(struct net_device *netdev,
 {
 	struct e1000_adapter *adapter = netdev_priv(netdev);
 
-	if (adapter->itr_setting <= 3)
+	if (adapter->itr_setting <= 4)
 		ec->rx_coalesce_usecs = adapter->itr_setting;
 	else
 		ec->rx_coalesce_usecs = 1000000 / adapter->itr_setting;
@@ -2001,12 +2020,14 @@ static int e1000_set_coalesce(struct net_device *netdev,
 	struct e1000_hw *hw = &adapter->hw;
 
 	if ((ec->rx_coalesce_usecs > E1000_MAX_ITR_USECS) ||
-	    ((ec->rx_coalesce_usecs > 3) &&
+	    ((ec->rx_coalesce_usecs > 4) &&
 	     (ec->rx_coalesce_usecs < E1000_MIN_ITR_USECS)) ||
 	    (ec->rx_coalesce_usecs == 2))
 		return -EINVAL;
 
-	if (ec->rx_coalesce_usecs <= 3) {
+	if (ec->rx_coalesce_usecs == 4) {
+		adapter->itr = adapter->itr_setting = 4;
+	} else if (ec->rx_coalesce_usecs <= 3) {
 		adapter->itr = 20000;
 		adapter->itr_setting = ec->rx_coalesce_usecs;
 	} else {
