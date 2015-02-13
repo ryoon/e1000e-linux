@@ -1131,6 +1131,12 @@ static inline struct mii_ioctl_data *_kc_if_mii(struct ifreq *rq)
 
 /*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,8) )
+#ifndef PCI_EXP_DEVCTL
+#define PCI_EXP_DEVCTL 8
+#endif
+#ifndef PCI_EXP_DEVCTL_CERE
+#define PCI_EXP_DEVCTL_CERE 0x0001
+#endif
 #define msleep(x)	do { set_current_state(TASK_UNINTERRUPTIBLE); \
 				schedule_timeout((x * HZ)/1000 + 2); \
 			} while (0)
@@ -1300,6 +1306,16 @@ extern void *_kc_kzalloc(size_t size, int flags);
 #endif
 
 /*****************************************************************************/
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,15) )
+#ifndef device_can_wakeup
+#define device_can_wakeup(dev)	(1)
+#endif
+#ifndef device_set_wakeup_enable
+#define device_set_wakeup_enable(dev, val)	do{}while(0)
+#endif
+#endif /* < 2.6.15 */
+
+/*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,16) )
 #undef HAVE_PCI_ERS
 #else /* 2.6.16 and above */
@@ -1407,7 +1423,11 @@ extern void _kc_pci_restore_state(struct pci_dev *);
 extern void _kc_free_netdev(struct net_device *);
 #define free_netdev(netdev) _kc_free_netdev(netdev)
 #endif
-
+#define pci_enable_pcie_error_reporting(dev) do {} while (0)
+#define pci_disable_pcie_error_reporting(dev) do {} while (0)
+#define pci_cleanup_aer_uncorrect_error_status(dev) do {} while (0)
+#else /* 2.6.19 */
+#include <linux/aer.h>
 #endif /* < 2.6.19 */
 /*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,20) )
@@ -1566,10 +1586,27 @@ extern int __kc_adapter_clean(struct net_device *, int *);
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,26) )
 #else /* < 2.6.26 */
 #include <linux/pci-aspm.h>
+#define HAVE_NETDEV_VLAN_FEATURES
 #endif /* < 2.6.26 */
 
 /*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,27) )
+#if ( LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,15) )
+#undef device_set_wakeup_enable
+#define device_set_wakeup_enable(dev, val) \
+	do { \
+		u16 pmc = 0; \
+		int pm = pci_find_capability(adapter->pdev, PCI_CAP_ID_PM); \
+		if (pm) { \
+			pci_read_config_word(adapter->pdev, pm + PCI_PM_PMC, \
+				&pmc); \
+		} \
+		if (val && (pmc >> 11)) \
+			(dev)->power.can_wakeup = !!(val); \
+		(dev)->power.should_wakeup = !!(val); \
+	} while (0)
+#endif /* 2.6.15 through 2.6.27 */
+
 #ifndef netif_napi_del
 #define netif_napi_del(_a) do {} while (0)
 #ifdef NAPI
@@ -1593,17 +1630,31 @@ extern void _kc_netif_tx_start_all_queues(struct net_device *);
 #define netif_tx_stop_all_queues(a) _kc_netif_tx_stop_all_queues(a)
 #define netif_tx_wake_all_queues(a) _kc_netif_tx_wake_all_queues(a)
 #define netif_tx_start_all_queues(a) _kc_netif_tx_start_all_queues(a)
+#undef netif_stop_subqueue
+#define netif_stop_subqueue(_ndev,_qi) do { \
+	if (netif_is_multiqueue((_ndev))) \
+		netif_stop_subqueue((_ndev), (_qi)); \
+	else \
+		netif_stop_queue((_ndev)); \
+	} while (0)
+#undef netif_start_subqueue
+#define netif_start_subqueue(_ndev,_qi) do { \
+	if (netif_is_multiqueue((_ndev))) \
+		netif_start_subqueue((_ndev), (_qi)); \
+	else \
+		netif_start_queue((_ndev)); \
+	} while (0)
 #else /* CONFIG_NETDEVICES_MULTIQUEUE */
 #define netif_tx_stop_all_queues(a) netif_stop_queue(a)
 #define netif_tx_wake_all_queues(a) netif_wake_queue(a)
 #define netif_tx_start_all_queues(a) netif_start_queue(a)
+#define netif_stop_subqueue(_ndev,_qi) netif_stop_queue((_ndev))
+#define netif_start_subqueue(_ndev,_qi) netif_start_queue((_ndev))
 #endif /* CONFIG_NETDEVICES_MULTIQUEUE */
 #ifndef NETIF_F_MULTI_QUEUE
 #define NETIF_F_MULTI_QUEUE 0
 #define netif_is_multiqueue(a) 0
-#define netif_stop_subqueue(a, b)
 #define netif_wake_subqueue(a, b)
-#define netif_start_subqueue(a, b)
 #endif /* NETIF_F_MULTI_QUEUE */
 #else /* < 2.6.27 */
 #define HAVE_TX_MQ

@@ -56,7 +56,7 @@
 
 #define DRV_DEBUG
 
-#define DRV_VERSION "0.5.8.2" DRV_NAPI DRV_DEBUG
+#define DRV_VERSION "0.5.11.2" DRV_NAPI DRV_DEBUG
 char e1000e_driver_name[] = "e1000e";
 const char e1000e_driver_version[] = DRV_VERSION;
 
@@ -106,8 +106,9 @@ static s32 e1000_get_variants_82571(struct e1000_adapter *adapter)
 
 	case e1000_82573:
 		if (pdev->device == E1000_DEV_ID_82573L) {
-			e1000_read_nvm(&adapter->hw, NVM_INIT_3GIO_3, 1,
-				       &eeprom_data);
+			if (e1000_read_nvm(&adapter->hw, NVM_INIT_3GIO_3, 1,
+			                   &eeprom_data) < 0)
+				break;
 			if (!(eeprom_data & NVM_WORD1A_ASPM_MASK))
 				adapter->flags |= FLAG_HAS_JUMBO_FRAMES;
 		}
@@ -888,9 +889,8 @@ done_cleaning:
 
 #define TX_WAKE_THRESHOLD 32
 	if (cleaned && netif_carrier_ok(netdev) &&
-	    e1000_desc_unused(tx_ring) >= TX_WAKE_THRESHOLD) {
-		/*
-		 * Make sure that anybody stopping the queue after this
+		     e1000_desc_unused(tx_ring) >= TX_WAKE_THRESHOLD) {
+		/* Make sure that anybody stopping the queue after this
 		 * sees the new next_to_clean.
 		 */
 		smp_mb();
@@ -1369,6 +1369,14 @@ static void e1000_clean_rx_ring(struct e1000_adapter *adapter)
 	writel(0, adapter->hw.hw_addr + rx_ring->tail);
 }
 
+static void e1000e_downshift_workaround(struct work_struct *work)
+{
+	struct e1000_adapter *adapter = container_of(work,
+					struct e1000_adapter, downshift_task);
+
+	e1000e_gig_downshift_workaround_ich8lan(&adapter->hw);
+}
+
 #ifndef CONFIG_E1000E_NAPI
 static void e1000_set_itr(struct e1000_adapter *adapter);
 #endif
@@ -1399,7 +1407,7 @@ static irqreturn_t e1000_intr_msi(int irq, void *data)
 		 */
 		if ((adapter->flags & FLAG_LSC_GIG_SPEED_DROP) &&
 		    (!(er32(STATUS) & E1000_STATUS_LU)))
-			e1000e_gig_downshift_workaround_ich8lan(hw);
+			schedule_work(&adapter->downshift_task);
 
 		/*
 		 * 80003ES2LAN workaround-- For packet buffer work-around on
@@ -1488,7 +1496,7 @@ static irqreturn_t e1000_intr(int irq, void *data)
 		 */
 		if ((adapter->flags & FLAG_LSC_GIG_SPEED_DROP) &&
 		    (!(er32(STATUS) & E1000_STATUS_LU)))
-			e1000e_gig_downshift_workaround_ich8lan(hw);
+			schedule_work(&adapter->downshift_task);
 
 		/*
 		 * 80003ES2LAN workaround--
@@ -1802,7 +1810,7 @@ static int e1000_request_msix(struct e1000_adapter *adapter)
 
 	if (strlen(netdev->name) < (IFNAMSIZ - 5))
 #ifdef CONFIG_E1000E_SEPARATE_TX_HANDLER
-		sprintf(adapter->rx_ring->name, "%s-rx0", netdev->name);
+		sprintf(adapter->rx_ring->name, "%s-rx-0", netdev->name);
 #else
 		sprintf(adapter->rx_ring->name, "%s-Q0", netdev->name);
 #endif
@@ -1819,7 +1827,7 @@ static int e1000_request_msix(struct e1000_adapter *adapter)
 
 #ifdef CONFIG_E1000E_SEPARATE_TX_HANDLER
 	if (strlen(netdev->name) < (IFNAMSIZ - 5))
-		sprintf(adapter->tx_ring->name, "%s-tx0", netdev->name);
+		sprintf(adapter->tx_ring->name, "%s-tx-0", netdev->name);
 	else
 		memcpy(adapter->tx_ring->name, netdev->name, IFNAMSIZ);
 	err = request_irq(adapter->msix_entries[vector].vector,
@@ -2936,7 +2944,7 @@ static void e1000_update_mc_addr_list(struct e1000_hw *hw, u8 *mc_addr_list,
 				      u32 rar_count)
 {
 	hw->mac.ops.update_mc_addr_list(hw, mc_addr_list, mc_addr_count,
-					rar_used_count, rar_count);
+				        rar_used_count, rar_count);
 }
 
 /**
@@ -3321,8 +3329,6 @@ static int __devinit e1000_sw_init(struct e1000_adapter *adapter)
 	/* Explicitly disable IRQ since the NIC can be in any state. */
 	e1000_irq_disable(adapter);
 
-	spin_lock_init(&adapter->stats_lock);
-
 	set_bit(__E1000_DOWN, &adapter->state);
 	return 0;
 }
@@ -3652,17 +3658,32 @@ static int e1000_set_mac(struct net_device *netdev, void *p)
 }
 
 /**
- * Need to wait a few seconds after link up to get diagnostic information from
- * the phy
+ * e1000e_update_phy_task - work thread to update phy
+ * @work: pointer to our work struct
+ *
+ * this worker thread exists because we must acquire a
+ * semaphore to read the phy, which we could msleep while
+ * waiting for it, and we can't msleep in a timer.
  **/
-static void e1000_update_phy_info(unsigned long data)
+static void e1000e_update_phy_task(struct work_struct *work)
 {
-	struct e1000_adapter *adapter = (struct e1000_adapter *) data;
+	struct e1000_adapter *adapter = container_of(work,
+					struct e1000_adapter, update_phy_task);
 	e1000_get_phy_info(&adapter->hw);
 }
 
+/*
+ * Need to wait a few seconds after link up to get diagnostic information from
+ * the phy
+ */
+static void e1000_update_phy_info(unsigned long data)
+{
+	struct e1000_adapter *adapter = (struct e1000_adapter *) data;
+	schedule_work(&adapter->update_phy_task);
+}
+
 /**
- * e1000_update_stats - Update the board statistics counters
+ * e1000e_update_stats - Update the board statistics counters
  * @adapter: board private structure
  **/
 void e1000e_update_stats(struct e1000_adapter *adapter)
@@ -3671,10 +3692,6 @@ void e1000e_update_stats(struct e1000_adapter *adapter)
 #ifdef HAVE_PCI_ERS
 	struct pci_dev *pdev = adapter->pdev;
 #endif
-	unsigned long irq_flags;
-	u16 phy_tmp;
-
-#define PHY_IDLE_ERROR_COUNT_MASK 0x00FF
 
 	/*
 	 * Prevent stats update while adapter is being reset, or if the pci
@@ -3686,14 +3703,6 @@ void e1000e_update_stats(struct e1000_adapter *adapter)
 	if (pci_channel_offline(pdev))
 		return;
 #endif
-
-	spin_lock_irqsave(&adapter->stats_lock, irq_flags);
-
-	/*
-	 * these counters are modified from e1000_adjust_tbi_stats,
-	 * called from the interrupt context, so they must only
-	 * be written while holding adapter->stats_lock
-	 */
 
 	adapter->stats.crcerrs += er32(CRCERRS);
 	adapter->stats.gprc += er32(GPRC);
@@ -3766,21 +3775,10 @@ void e1000e_update_stats(struct e1000_adapter *adapter)
 
 	/* Tx Dropped needs to be maintained elsewhere */
 
-	/* Phy Stats */
-	if (hw->phy.media_type == e1000_media_type_copper) {
-		if ((adapter->link_speed == SPEED_1000) &&
-		   (!e1e_rphy(hw, PHY_1000T_STATUS, &phy_tmp))) {
-			phy_tmp &= PHY_IDLE_ERROR_COUNT_MASK;
-			adapter->phy_stats.idle_errors += phy_tmp;
-		}
-	}
-
 	/* Management Stats */
 	adapter->stats.mgptc += er32(MGTPTC);
 	adapter->stats.mgprc += er32(MGTPRC);
 	adapter->stats.mgpdc += er32(MGTPDC);
-
-	spin_unlock_irqrestore(&adapter->stats_lock, irq_flags);
 }
 
 #ifdef SIOCGMIIPHY
@@ -3793,10 +3791,6 @@ static void e1000_phy_read_status(struct e1000_adapter *adapter)
 	struct e1000_hw *hw = &adapter->hw;
 	struct e1000_phy_regs *phy = &adapter->phy_regs;
 	int ret_val;
-	unsigned long irq_flags;
-
-
-	spin_lock_irqsave(&adapter->stats_lock, irq_flags);
 
 	if ((er32(STATUS) & E1000_STATUS_LU) &&
 	    (adapter->hw.phy.media_type == e1000_media_type_copper)) {
@@ -3827,8 +3821,6 @@ static void e1000_phy_read_status(struct e1000_adapter *adapter)
 		phy->stat1000 = 0;
 		phy->estatus = (ESTATUS_1000_TFULL | ESTATUS_1000_THALF);
 	}
-
-	spin_unlock_irqrestore(&adapter->stats_lock, irq_flags);
 }
 
 #endif /* SIOCGMIIPHY */
@@ -3849,7 +3841,7 @@ static void e1000_print_link_info(struct e1000_adapter *adapter)
 	       ((ctrl & E1000_CTRL_TFCE) ? "TX" : "None" )));
 }
 
-static bool e1000_has_link(struct e1000_adapter *adapter)
+bool e1000_has_link(struct e1000_adapter *adapter)
 {
 	struct e1000_hw *hw = &adapter->hw;
 	bool link_active = 0;
@@ -4039,8 +4031,10 @@ static void e1000_watchdog_task(struct work_struct *work)
 			tctl |= E1000_TCTL_EN;
 			ew32(TCTL, tctl);
 
-			/* perform any ipost-link-up configuration before
-			   reporting link up */
+			/*
+			 * Perform any post-link-up configuration before
+			 * reporting link up.
+			 */
 			if (phy->ops.cfg_on_link_up) 
 				phy->ops.cfg_on_link_up(hw);
 
@@ -4232,12 +4226,12 @@ static bool e1000_tx_csum(struct e1000_adapter *adapter, struct sk_buff *skb)
 			cmd_len |= E1000_TXD_CMD_TCP;
 		break;
 	default:
-		if (unlikely(net_ratelimit())) 
+		if (unlikely(net_ratelimit()))
 			e_warn("checksum_partial proto=%x!\n", skb->protocol);
 		break;
 	}
 
-  	css = skb_transport_offset(skb);
+	css = skb_transport_offset(skb);
 
 	i = tx_ring->next_to_use;
 	buffer_info = &tx_ring->buffer_info[i];
@@ -4245,7 +4239,8 @@ static bool e1000_tx_csum(struct e1000_adapter *adapter, struct sk_buff *skb)
 
 	context_desc->lower_setup.ip_config = 0;
 	context_desc->upper_setup.tcp_fields.tucss = css;
-	context_desc->upper_setup.tcp_fields.tucso = css + skb->csum_offset;
+	context_desc->upper_setup.tcp_fields.tucso =
+				css + skb->csum_offset;
 	context_desc->upper_setup.tcp_fields.tucse = 0;
 	context_desc->tcp_seg_setup.data = 0;
 	context_desc->cmd_and_length = cpu_to_le32(cmd_len);
@@ -4932,7 +4927,27 @@ static int e1000_suspend(struct pci_dev *pdev, pm_message_t state)
 
 	pci_disable_device(pdev);
 
-	pci_set_power_state(pdev, pci_choose_state(pdev, state));
+	/* 
+	 * The pci-e switch on some quad port adapters will report a
+	 * correctable error when the MAC transitions from D0 to D3.  To
+	 * prevent this we need to mask off the correctable errors on the
+	 * downstream port of the pci-e switch.
+	 */
+	if (adapter->flags & FLAG_IS_QUAD_PORT) {
+		struct pci_dev *us_dev = pdev->bus->self;
+		int pos = pci_find_capability(us_dev, PCI_CAP_ID_EXP);
+		u16 devctl;
+
+		pci_read_config_word(us_dev, pos + PCI_EXP_DEVCTL, &devctl);
+		pci_write_config_word(us_dev, pos + PCI_EXP_DEVCTL,
+		                      (devctl & ~PCI_EXP_DEVCTL_CERE));
+
+		pci_set_power_state(pdev, pci_choose_state(pdev, state));
+
+		pci_write_config_word(us_dev, pos + PCI_EXP_DEVCTL, devctl);
+	} else {
+		pci_set_power_state(pdev, pci_choose_state(pdev, state));
+	}
 
 	return 0;
 }
@@ -5172,14 +5187,12 @@ static void e1000_print_device_info(struct e1000_adapter *adapter)
 	u32 pba_num;
 
 	/* print bus type/speed/width info */
-	e_info("(PCI Express:2.5GB/s:%s) %02x:%02x:%02x:%02x:%02x:%02x\n",
+	e_info("(PCI Express:2.5GB/s:%s) %pM\n",
 	       /* bus width */
 	       ((hw->bus.width == e1000_bus_width_pcie_x4) ? "Width x4" :
 	        "Width x1"),
 	       /* MAC address */
-	       netdev->dev_addr[0], netdev->dev_addr[1],
-	       netdev->dev_addr[2], netdev->dev_addr[3],
-	       netdev->dev_addr[4], netdev->dev_addr[5]);
+	       netdev->dev_addr);
 	e_info("Intel(R) PRO/%s Network Connection\n",
 	       (hw->phy.type == e1000_phy_ife) ? "10/100" : "1000");
 	e1000e_read_pba_num(hw, &pba_num);
@@ -5192,26 +5205,26 @@ static void e1000_eeprom_checks(struct e1000_adapter *adapter)
 	struct e1000_hw *hw = &adapter->hw;
 	int ret_val;
 	u16 buf = 0;
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,5,0) )
+	struct pci_dev *pdev = adapter->pdev;
+#endif
 
 	if (hw->mac.type != e1000_82573)
 		return;
 
 	ret_val = e1000_read_nvm(hw, NVM_INIT_CONTROL2_REG, 1, &buf);
-	if (!(le16_to_cpu(buf) & (1 << 0))) {
+	if (!ret_val && (!(le16_to_cpu(buf) & (1 << 0)))) {
 		/* Deep Smart Power Down (DSPD) */
-		e_warn("Warning: detected DSPD enabled in EEPROM\n");
+		dev_warn(&adapter->pdev->dev,
+			 "Warning: detected DSPD enabled in EEPROM\n");
 	}
 
 	ret_val = e1000_read_nvm(hw, NVM_INIT_3GIO_3, 1, &buf);
-	if (le16_to_cpu(buf) & (3 << 2)) {
+	if (!ret_val && (le16_to_cpu(buf) & (3 << 2))) {
 		/* ASPM enable */
-		e_warn("Warning: detected ASPM enabled in EEPROM\n");
+		dev_warn(&adapter->pdev->dev,
+			 "Warning: detected ASPM enabled in EEPROM\n");
 	}
-}
-
-void e1000_read_pci_cfg(struct e1000_hw *hw, u32 reg, u16 *value)
-{
-	pci_read_config_word(hw->adapter->pdev, reg, value);
 }
 
 s32 e1000_read_pcie_cap_reg(struct e1000_hw *hw, u32 reg, u16 *value)
@@ -5245,7 +5258,6 @@ static int __devinit e1000_probe(struct pci_dev *pdev,
 	struct e1000_adapter *adapter;
 	struct e1000_hw *hw;
 	const struct e1000_info *ei = e1000_info_tbl[ent->driver_data];
-
 	static int cards_found;
 	int i, err, pci_using_dac;
 	u16 eeprom_data = 0;
@@ -5461,6 +5473,8 @@ static int __devinit e1000_probe(struct pci_dev *pdev,
 
 	INIT_WORK(&adapter->reset_task, e1000_reset_task);
 	INIT_WORK(&adapter->watchdog_task, e1000_watchdog_task);
+	INIT_WORK(&adapter->downshift_task, e1000e_downshift_workaround);
+	INIT_WORK(&adapter->update_phy_task, e1000e_update_phy_task);
 
 	/* Initialize link parameters. User can change them with ethtool */
 	adapter->hw.mac.autoneg = 1;
@@ -5505,6 +5519,10 @@ static int __devinit e1000_probe(struct pci_dev *pdev,
 
 	/* initialize the wol settings based on the eeprom settings */
 	adapter->wol = adapter->eeprom_wol;
+	device_set_wakeup_enable(&adapter->pdev->dev, adapter->wol);
+
+	/* save off EEPROM version number */
+	e1000_read_nvm(&adapter->hw, 5, 1, &adapter->eeprom_vers);
 
 	/* reset the hardware with the new settings */
 	e1000e_reset(adapter);
@@ -5537,10 +5555,12 @@ err_eeprom:
 	if (!e1000_check_reset_block(&adapter->hw))
 		e1000_phy_hw_reset(&adapter->hw);
 err_hw_init:
-
 	kfree(adapter->tx_ring);
 	kfree(adapter->rx_ring);
 err_sw_init:
+#ifdef CONFIG_E1000E_MSIX
+	e1000e_reset_interrupt_capability(adapter);
+#endif /* CONFIG_E1000E_MSIX */
 	if (adapter->hw.flash_address)
 		iounmap(adapter->hw.flash_address);
 err_flashmap:

@@ -289,6 +289,15 @@ static s32 e1000_init_mac_params_82571(struct e1000_hw *hw)
 
 	/* bus type/speed/width */
 	mac->ops.get_bus_info = e1000e_get_bus_info_pcie;
+	/* function id */
+	switch (hw->mac.type) {
+	case e1000_82573:
+	case e1000_82574:
+		mac->ops.set_lan_id = e1000_set_lan_id_single_port;
+		break;
+	default:
+		break;
+	}
 	/* reset */
 	mac->ops.reset_hw = e1000_reset_hw_82571;
 	/* hw initialization */
@@ -335,6 +344,8 @@ static s32 e1000_init_mac_params_82571(struct e1000_hw *hw)
 	mac->ops.mta_set = e1000_mta_set_generic;
 	/* read mac address */
 	mac->ops.read_mac_addr = e1000_read_mac_addr_82571;
+	/* ID LED init */
+	mac->ops.id_led_init = e1000e_id_led_init;
 	/* blink LED */
 	mac->ops.blink_led = e1000e_blink_led;
 	/* setup LED */
@@ -899,7 +910,7 @@ static s32 e1000_init_hw_82571(struct e1000_hw *hw)
 	e1000_initialize_hw_bits_82571(hw);
 
 	/* Initialize identification LED */
-	ret_val = e1000e_id_led_init(hw);
+	ret_val = mac->ops.id_led_init(hw);
 	if (ret_val) {
 		e_dbg("Error initializing identification LED\n");
 		/* This is not fatal and we should not stop init due to this */
@@ -1024,13 +1035,32 @@ static void e1000_initialize_hw_bits_82571(struct e1000_hw *hw)
 		ew32(CTRL_EXT, reg);
 	}
 
-	/* PCI-Ex Control Register */
+	if (hw->mac.type == e1000_82571) {
+		reg = er32(PBA_ECC);
+		reg |= E1000_PBA_ECC_CORR_EN;
+		ew32(PBA_ECC, reg);
+	}
+
+	/* PCI-Ex Control Registers */
 	if (hw->mac.type == e1000_82574) {
 		reg = er32(GCR);
 		reg |= (1 << 22);
 		ew32(GCR, reg);
 	}
 
+	/*
+	 * Workaround for hardware errata.
+	 * apply workaround for hardware errata documented in errata docs
+	 * Fixes issue where some error prone or unreliable PCIe completions
+	 * are occurring, particularly with ASPM enabled.
+	 * Without fix, issue can cause tx timeouts.
+	 */
+
+	if (hw->mac.type == e1000_82574) {
+		reg = er32(GCR2);
+		reg |= 1;
+		ew32(GCR2, reg);
+	}
 	return;
 }
 

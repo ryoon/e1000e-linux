@@ -56,6 +56,7 @@
 #define E1000_FCTTV    0x00170  /* Flow Control Transmit Timer Value - RW */
 #define E1000_TXCW     0x00178  /* Tx Configuration Word - RW */
 #define E1000_RXCW     0x00180  /* Rx Configuration Word - RO */
+#define E1000_PBA_ECC  0x01100  /* PBA ECC Register */
 #define E1000_TCTL     0x00400  /* Tx Control - RW */
 #define E1000_TCTL_EXT 0x00404  /* Extended Tx Control - RW */
 #define E1000_TIPG     0x00410  /* Tx Inter-packet gap -RW */
@@ -289,6 +290,7 @@
 #define E1000_GIOCTL      0x05B44 /* GIO Analog Control Register */
 #define E1000_SCCTL       0x05B4C /* PCIc PLL Configuration Register */
 #define E1000_GCR         0x05B00 /* PCI-Ex Control */
+#define E1000_GCR2        0x05B64 /* PCI-Ex Control #2 */
 #define E1000_GSCL_1    0x05B10 /* PCI-Ex Statistic Control #1 */
 #define E1000_GSCL_2    0x05B14 /* PCI-Ex Statistic Control #2 */
 #define E1000_GSCL_3    0x05B18 /* PCI-Ex Statistic Control #3 */

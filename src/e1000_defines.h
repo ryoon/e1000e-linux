@@ -666,13 +666,16 @@
 #define E1000_PBA_6K  0x0006	/* 6KB */
 #define E1000_PBA_8K  0x0008    /* 8KB */
 #define E1000_PBA_12K 0x000C    /* 12KB */
+#define E1000_PBA_14K 0x000E    /* 14KB */
 #define E1000_PBA_16K 0x0010    /* 16KB */
+#define E1000_PBA_18K 0x0012
 #define E1000_PBA_20K 0x0014
 #define E1000_PBA_22K 0x0016
 #define E1000_PBA_24K 0x0018
 #define E1000_PBA_30K 0x001E
 #define E1000_PBA_32K 0x0020
 #define E1000_PBA_34K 0x0022
+#define E1000_PBA_35K 0x0023
 #define E1000_PBA_38K 0x0026
 #define E1000_PBA_40K 0x0028
 #define E1000_PBA_48K 0x0030    /* 48KB */
@@ -733,6 +736,13 @@
 #define E1000_ICR_TXQ0          0x00400000 /* Tx Queue 0 Interrupt */
 #define E1000_ICR_TXQ1          0x00800000 /* Tx Queue 1 Interrupt */
 #define E1000_ICR_OTHER         0x01000000 /* Other Interrupts */
+
+/* PBA ECC Register */
+#define E1000_PBA_ECC_COUNTER_MASK  0xFFF00000 /* ECC counter mask */
+#define E1000_PBA_ECC_COUNTER_SHIFT 20         /* ECC counter shift value */
+#define E1000_PBA_ECC_CORR_EN       0x00000001 /* Enable ECC error correction */
+#define E1000_PBA_ECC_STAT_CLR      0x00000002 /* Clear ECC error counter */
+#define E1000_PBA_ECC_INT_EN        0x00000004 /* Enable ICR bit 5 on ECC error */
 
 /*
  * This defines the bits that are set in the Interrupt Mask
@@ -1075,6 +1085,7 @@
 #define E1000_EECD_SHADV     0x00200000 /* Shadow RAM Data Valid */
 #define E1000_EECD_SEC1VAL   0x00400000 /* Sector One Valid */
 #define E1000_EECD_SECVAL_SHIFT      22
+#define E1000_EECD_SEC1VAL_VALID_MASK (E1000_EECD_AUTO_RD | E1000_EECD_PRES)
 
 #define E1000_NVM_SWDPIN0   0x0001   /* SWDPIN 0 NVM Value */
 #define E1000_NVM_LED_LOGIC 0x0020   /* Led Logic Word */

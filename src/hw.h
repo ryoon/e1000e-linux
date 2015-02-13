@@ -455,6 +455,7 @@ struct e1000_host_mng_command_info {
 struct e1000_mac_operations {
 	/* Function pointers for the MAC. */
 	s32  (*init_params)(struct e1000_hw *);
+	s32  (*id_led_init)(struct e1000_hw *);
 	s32  (*blink_led)(struct e1000_hw *);
 	s32  (*check_for_link)(struct e1000_hw *);
 	bool (*check_mng_mode)(struct e1000_hw *hw);
@@ -462,6 +463,7 @@ struct e1000_mac_operations {
 	void (*clear_hw_cntrs)(struct e1000_hw *);
 	void (*clear_vfta)(struct e1000_hw *);
 	s32  (*get_bus_info)(struct e1000_hw *);
+	void (*set_lan_id)(struct e1000_hw *);
 	s32  (*get_link_up_info)(struct e1000_hw *, u16 *, u16 *);
 	s32  (*led_on)(struct e1000_hw *);
 	s32  (*led_off)(struct e1000_hw *);
@@ -669,6 +671,5 @@ struct e1000_hw {
 
 /* These functions must be implemented by drivers */
 s32  e1000_read_pcie_cap_reg(struct e1000_hw *hw, u32 reg, u16 *value);
-void e1000_read_pci_cfg(struct e1000_hw *hw, u32 reg, u16 *value);
 
 #endif

@@ -204,6 +204,7 @@ struct e1000_adapter {
 	u16 mng_vlan_id;
 	u16 link_speed;
 	u16 link_duplex;
+	u16 eeprom_vers;
 
 	spinlock_t tx_queue_lock; /* prevent concurrent tail updates */
 
@@ -288,7 +289,6 @@ struct e1000_adapter {
 	struct net_device *netdev;
 	struct pci_dev *pdev;
 	struct net_device_stats net_stats;
-	spinlock_t stats_lock;      /* prevent concurrent stats updates */
 
 	/* structs defined in e1000_hw.h */
 	struct e1000_hw hw;
@@ -323,6 +323,8 @@ struct e1000_adapter {
 
 	unsigned int flags;
 	unsigned int flags2;
+	struct work_struct downshift_task;
+	struct work_struct update_phy_task;
 	u32 *config_space;
 };
 
@@ -412,6 +414,7 @@ extern int e1000e_setup_tx_resources(struct e1000_adapter *adapter);
 extern void e1000e_free_rx_resources(struct e1000_adapter *adapter);
 extern void e1000e_free_tx_resources(struct e1000_adapter *adapter);
 extern void e1000e_update_stats(struct e1000_adapter *adapter);
+extern bool e1000_has_link(struct e1000_adapter *adapter);
 #ifdef CONFIG_E1000E_MSIX
 extern void e1000e_set_interrupt_capability(struct e1000_adapter *adapter);
 extern void e1000e_reset_interrupt_capability(struct e1000_adapter *adapter);
@@ -570,10 +573,10 @@ extern void e1000e_release_nvm(struct e1000_hw *hw);
 
 static inline s32 e1000e_read_mac_addr(struct e1000_hw *hw)
 {
-	if (hw->mac.ops.read_mac_addr)
-		return hw->mac.ops.read_mac_addr(hw);
+       if (hw->mac.ops.read_mac_addr)
+               return hw->mac.ops.read_mac_addr(hw);
 
-	return e1000e_read_mac_addr_generic(hw);
+       return e1000e_read_mac_addr_generic(hw);
 }
 
 static inline s32 e1000_validate_nvm_checksum(struct e1000_hw *hw)

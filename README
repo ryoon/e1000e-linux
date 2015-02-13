@@ -1,7 +1,7 @@
 Linux* Base Driver for Intel(R) Network Connection
 ===============================================================
 
-October 14, 2008
+November 21, 2008
 
 Contents
 ========
@@ -11,7 +11,6 @@ Contents
 - Upgrading
 - Building and Installation
 - Command Line Parameters
-- Speed and Duplex Configuration
 - Additional Configurations
 - Known Issues/Troubleshooting
 - Support
@@ -520,163 +519,167 @@ Known Issues/Troubleshooting
   working, verify in the "In This Release" section of the readme that you have 
   installed the correct driver.
 
-Intel(R) Active Management Technology 2.0, 2.1, 2.5 not supported in 
-conjunction with Linux driver
----------------------------------------------------------------------
+  Intel(R) Active Management Technology 2.0, 2.1, 2.5 not supported in 
+  conjunction with Linux driver
+  ---------------------------------------------------------------------
 
-Detected Tx Unit Hang in Quad Port Adapters
--------------------------------------------
-In some cases ports 3 and 4 don't pass traffic and report 'Detected Tx Unit
-Hang' followed by 'NETDEV WATCHDOG: ethX: transmit timed out' errors. Ports 
-1 and 2 don't show any errors and will pass traffic.
+  Detected Tx Unit Hang in Quad Port Adapters
+  -------------------------------------------
+  In some cases ports 3 and 4 don't pass traffic and report 'Detected Tx Unit
+  Hang' followed by 'NETDEV WATCHDOG: ethX: transmit timed out' errors. Ports 
+  1 and 2 don't show any errors and will pass traffic.
 
-This issue MAY be resolved by updating to the latest kernel and BIOS. The 
-user is encouraged to run an OS that fully supports MSI interrupts. You can 
-check your system's BIOS by downloading the Linux Firmware Developer Kit 
-that can be obtained at http://www.linuxfirmwarekit.org/
+  This issue MAY be resolved by updating to the latest kernel and BIOS. The 
+  user is encouraged to run an OS that fully supports MSI interrupts. You can 
+  check your system's BIOS by downloading the Linux Firmware Developer Kit 
+  that can be obtained at http://www.linuxfirmwarekit.org/
 
-Adapters with 4 ports behind a PCIe bridge 
-------------------------------------------
-Adapters that have 4 ports behind a PCIe bridge may be incompatible with 
-some systems. The user should run the Linux firmware kit from 2686434
-http://www.linuxfirmwarekit.org to test their BIOS, if they have interrupt or 
-"missing interface" problems, especially with older kernels.
+  Adapters with 4 ports behind a PCIe bridge 
+  ------------------------------------------
+  Adapters that have 4 ports behind a PCIe bridge may be incompatible with 
+  some systems. The user should run the Linux firmware kit from 2686434
+  http://www.linuxfirmwarekit.org to test their BIOS, if they have interrupt or 
+  "missing interface" problems, especially with older kernels.
 
-82573(V/L/E) TX Unit Hang Messages
-----------------------------------
-Several adapters with the 82573 chipset display "TX unit hang" messages 
-during normal operation with the e1000e driver. The issue appears both with 
-TSO enabled and disabled, and is caused by a power management function that 
-is enabled in the EEPROM. Early releases of the chipsets to vendors had the 
-EEPROM bit that enabled the feature. After the issue was discovered newer 
-adapters were released with the feature disabled in the EEPROM. 
+  82573(V/L/E) TX Unit Hang Messages
+  ----------------------------------
+  Several adapters with the 82573 chipset display "TX unit hang" messages 
+  during normal operation with the e1000e driver. The issue appears both with 
+  TSO enabled and disabled, and is caused by a power management function that 
+  is enabled in the EEPROM. Early releases of the chipsets to vendors had the 
+  EEPROM bit that enabled the feature. After the issue was discovered newer 
+  adapters were released with the feature disabled in the EEPROM. 
 
-If you encounter the problem in an adapter, and the chipset is an 82573-based
-one, you can verify that your adapter needs the fix by using ethtool: 
+  If you encounter the problem in an adapter, and the chipset is an 82573-based
+  one, you can verify that your adapter needs the fix by using ethtool: 
 
- # ethtool -e eth0
- Offset          Values
- ------          ------
- 0x0000          00 12 34 56 fe dc 30 0d 46 f7 f4 00 ff ff ff ff
- 0x0010          ff ff ff ff 6b 02 8c 10 d9 15 8c 10 86 80 de 83
+  # ethtool -e eth0
+  Offset          Values
+  ------          ------
+  0x0000          00 12 34 56 fe dc 30 0d 46 f7 f4 00 ff ff ff ff
+  0x0010          ff ff ff ff 6b 02 8c 10 d9 15 8c 10 86 80 de 83
                                                            ^^
-The value at offset 0x001e (de) has bit 0 unset. This enables the problematic 
-power saving feature. In this case, the EEPROM needs to read "df" at offset 
-0x001e. 
+  The value at offset 0x001e (de) has bit 0 unset. This enables the problematic 
+  power saving feature. In this case, the EEPROM needs to read "df" at offset 
+  0x001e. 
 
-A one-time EEPROM fix is available as a shell script. This script will verify 
-that the adapter is applicable to the fix and if the fix is needed or not. If 
-the fix is required, it applies the change to the EEPROM and updates the 
-checksum. The user must reboot the system after applying the fix if changes 
-were made to the EEPROM. 
+  A one-time EEPROM fix is available as a shell script. This script will verify 
+  that the adapter is applicable to the fix and if the fix is needed or not. If 
+  the fix is required, it applies the change to the EEPROM and updates the 
+  checksum. The user must reboot the system after applying the fix if changes 
+  were made to the EEPROM. 
 
-Example output of the script: 
+  Example output of the script: 
 
- # bash fixeep-82573-dspd.sh eth0
- eth0: is a "82573E Gigabit Ethernet Controller"
- This fixup is applicable to your hardware
- executing command: ethtool -E eth0 magic 0x109a8086 offset 0x1e value 0xdf
- Change made. You *MUST* reboot your machine before changes take effect!
+  # bash fixeep-82573-dspd.sh eth0
+  eth0: is a "82573E Gigabit Ethernet Controller"
+  This fixup is applicable to your hardware
+  executing command: ethtool -E eth0 magic 0x109a8086 offset 0x1e value 0xdf
+  Change made. You *MUST* reboot your machine before changes take effect!
 
-The script can be downloaded at 
-http://e1000.sourceforge.net/files/fixeep-82573-dspd.sh
+  The script can be downloaded at 
+  http://e1000.sourceforge.net/files/fixeep-82573-dspd.sh
 
-Dropped Receive Packets on Half-duplex 10/100 Networks
-------------------------------------------------------
-If you have an Intel PCI Express adapter running at 10mbps or 100mbps, half-
-duplex, you may observe occasional dropped receive packets.  There are no
-workarounds for this problem in this network configuration.  The network must
-be updated to operate in full-duplex, and/or 1000mbps only.
+  Dropped Receive Packets on Half-duplex 10/100 Networks
+  ------------------------------------------------------
+  If you have an Intel PCI Express adapter running at 10mbps or 100mbps, half-
+  duplex, you may observe occasional dropped receive packets.  There are no
+  workarounds for this problem in this network configuration.  The network must
+  be updated to operate in full-duplex, and/or 1000mbps only.
 
-Driver Compilation
-------------------
-When trying to compile the driver by running make install, the following
-error may occur:
+  Driver Compilation
+  ------------------
+  When trying to compile the driver by running make install, the following
+  error may occur:
 
     "Linux kernel source not configured - missing version.h"
 
-To solve this issue, create the version.h file by going to the Linux source
-tree and entering:
+  To solve this issue, create the version.h file by going to the Linux source
+  tree and entering:
 
     # make include/linux/version.h.
 
-Jumbo Frames System Requirement
--------------------------------
-Memory allocation failures have been observed on Linux systems with 64 MB
-of RAM or less that are running Jumbo Frames.  If you are using Jumbo
-Frames, your system may require more than the advertised minimum
-requirement of 64 MB of system memory.
+  Jumbo Frames System Requirement
+  -------------------------------
+  Memory allocation failures have been observed on Linux systems with 64 MB
+  of RAM or less that are running Jumbo Frames.  If you are using Jumbo
+  Frames, your system may require more than the advertised minimum
+  requirement of 64 MB of system memory.
 
-Performance Degradation with Jumbo Frames
------------------------------------------
-Degradation in throughput performance may be observed in some Jumbo frames
-environments.  If this is observed, increasing the application's socket
-buffer size and/or increasing the /proc/sys/net/ipv4/tcp_*mem entry values
-may help.  See the specific application manual and
-/usr/src/linux*/Documentation/
-networking/ip-sysctl.txt for more details.
+  Performance Degradation with Jumbo Frames
+  -----------------------------------------
+  Degradation in throughput performance may be observed in some Jumbo frames
+  environments.  If this is observed, increasing the application's socket
+  buffer size and/or increasing the /proc/sys/net/ipv4/tcp_*mem entry values
+  may help.  See the specific application manual and
+  /usr/src/linux*/Documentation/networking/ip-sysctl.txt for more details.
 
-Jumbo Frames on Foundry BigIron 8000 switch
--------------------------------------------
-There is a known issue using Jumbo frames when connected to a Foundry
-BigIron 8000 switch.  This is a 3rd party limitation.  If you experience
-loss of packets, lower the MTU size.
+  Jumbo Frames on Foundry BigIron 8000 switch
+  -------------------------------------------
+  There is a known issue using Jumbo frames when connected to a Foundry
+  BigIron 8000 switch.  This is a 3rd party limitation.  If you experience
+  loss of packets, lower the MTU size.
 
-Allocating Rx Buffers when Using Jumbo Frames 
----------------------------------------------
-Allocating Rx buffers when using Jumbo Frames on 2.6.x kernels may fail if 
-the available memory is heavily fragmented. This issue may be seen with PCI-X 
-adapters or with packet split disabled. This can be reduced or eliminated 
-by changing the amount of available memory for receive buffer allocation, by
-increasing /proc/sys/vm/min_free_kbytes. 
+  Allocating Rx Buffers when Using Jumbo Frames 
+  ---------------------------------------------
+  Allocating Rx buffers when using Jumbo Frames on 2.6.x kernels may fail if 
+  the available memory is heavily fragmented. This issue may be seen with PCI-X 
+  adapters or with packet split disabled. This can be reduced or eliminated 
+  by changing the amount of available memory for receive buffer allocation, by
+  increasing /proc/sys/vm/min_free_kbytes. 
 
-Multiple Interfaces on Same Ethernet Broadcast Network
-------------------------------------------------------
-Due to the default ARP behavior on Linux, it is not possible to have
-one system on two IP networks in the same Ethernet broadcast domain
-(non-partitioned switch) behave as expected.  All Ethernet interfaces
-will respond to IP traffic for any IP address assigned to the system.
-This results in unbalanced receive traffic.
+  Multiple Interfaces on Same Ethernet Broadcast Network
+  ------------------------------------------------------
+  Due to the default ARP behavior on Linux, it is not possible to have
+  one system on two IP networks in the same Ethernet broadcast domain
+  (non-partitioned switch) behave as expected.  All Ethernet interfaces
+  will respond to IP traffic for any IP address assigned to the system.
+  This results in unbalanced receive traffic.
 
-If you have multiple interfaces in a server, either turn on ARP
-filtering by entering:
+  If you have multiple interfaces in a server, either turn on ARP
+  filtering by entering:
 
     echo 1 > /proc/sys/net/ipv4/conf/all/arp_filter
-(this only works if your kernel's version is higher than 2.4.5),
+  (this only works if your kernel's version is higher than 2.4.5),
 
-NOTE: This setting is not saved across reboots.  The configuration
-change can be made permanent by adding the line:
+  NOTE: This setting is not saved across reboots.  The configuration
+  change can be made permanent by adding the line:
     net.ipv4.conf.all.arp_filter = 1
-to the file /etc/sysctl.conf
+  to the file /etc/sysctl.conf
 
       or,
 
-install the interfaces in separate broadcast domains (either in
-different switches or in a switch partitioned to VLANs).
+  install the interfaces in separate broadcast domains (either in
+  different switches or in a switch partitioned to VLANs).
 
-Disable rx flow control with ethtool
-------------------------------------
-In order to disable receive flow control using ethtool, you must turn
-off auto-negotiation on the same command line.
+  Disable rx flow control with ethtool
+  ------------------------------------
+  In order to disable receive flow control using ethtool, you must turn
+  off auto-negotiation on the same command line.
 
-For example:
+  For example:
 
    ethtool -A eth? autoneg off rx off
 
-Unplugging network cable while ethtool -p is running
-----------------------------------------------------
-In kernel versions 2.5.50 and later (including 2.6 kernel), unplugging 
-the network cable while ethtool -p is running will cause the system to 
-become unresponsive to keyboard commands, except for control-alt-delete.  
-Restarting the system appears to be the only remedy.
+  Unplugging network cable while ethtool -p is running
+  ----------------------------------------------------
+  In kernel versions 2.5.50 and later (including 2.6 kernel), unplugging 
+  the network cable while ethtool -p is running will cause the system to 
+  become unresponsive to keyboard commands, except for control-alt-delete.  
+  Restarting the system appears to be the only remedy.
 
-MSI-X Issues with Kernels between 2.6.19 - 2.6.21 (inclusive)
--------------------------------------------------------------
-Kernel panics and instability may be observed on any MSI-X hardware if you use
-irqbalance with kernels between 2.6.19 and 2.6.21. If such problems are 
-encountered, you may disable the irqbalance daemon or upgrade to a newer 
-kernel.
+  MSI-X Issues with Kernels between 2.6.19 - 2.6.21 (inclusive)
+  -------------------------------------------------------------
+  Kernel panics and instability may be observed on any MSI-X hardware if you 
+  use irqbalance with kernels between 2.6.19 and 2.6.21. If such problems are 
+  encountered, you may disable the irqbalance daemon or upgrade to a newer 
+  kernel.
 
+  Rx Page Allocation Errors
+  -------------------------
+  Page allocation failure. order:0 errors may occur under stress with kernels 
+  2.6.25 and above. This is cause by the way the Linux kernel reports this 
+  stressed condition.
 
 Support
 =======

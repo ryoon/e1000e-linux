@@ -328,6 +328,8 @@ static s32 e1000_init_mac_params_ich8lan(struct e1000_hw *hw)
 
 	/* bus type/speed/width */
 	mac->ops.get_bus_info = e1000_get_bus_info_ich8lan;
+	/* function id */
+	mac->ops.set_lan_id = e1000_set_lan_id_single_port;
 	/* reset */
 	mac->ops.reset_hw = e1000_reset_hw_ich8lan;
 	/* hw initialization */
@@ -346,17 +348,29 @@ static s32 e1000_init_mac_params_ich8lan(struct e1000_hw *hw)
 	mac->ops.update_mc_addr_list = e1000e_update_mc_addr_list_generic;
 	/* setting MTA */
 	mac->ops.mta_set = e1000_mta_set_generic;
-	/* blink LED */
-	mac->ops.blink_led = e1000e_blink_led;
-	/* setup LED */
-	mac->ops.setup_led = e1000_setup_led_generic;
-	/* cleanup LED */
-	mac->ops.cleanup_led = e1000_cleanup_led_ich8lan;
-	/* turn on/off LED */
-	mac->ops.led_on = e1000_led_on_ich8lan;
-	mac->ops.led_off = e1000_led_off_ich8lan;
 	/* clear hardware counters */
 	mac->ops.clear_hw_cntrs = e1000_clear_hw_cntrs_ich8lan;
+
+	/* LED operations */
+	switch (mac->type) {
+	case e1000_ich8lan:
+	case e1000_ich9lan:
+	case e1000_ich10lan:
+		/* ID LED init */
+		mac->ops.id_led_init = e1000e_id_led_init;
+		/* blink LED */
+		mac->ops.blink_led = e1000e_blink_led;
+		/* setup LED */
+		mac->ops.setup_led = e1000_setup_led_generic;
+		/* cleanup LED */
+		mac->ops.cleanup_led = e1000_cleanup_led_ich8lan;
+		/* turn on/off LED */
+		mac->ops.led_on = e1000_led_on_ich8lan;
+		mac->ops.led_off = e1000_led_off_ich8lan;
+		break;
+	default:
+		break;
+	}
 
 	/* Enable PCS Lock-loss workaround for ICH8 */
 	if (mac->type == e1000_ich8lan)
@@ -954,48 +968,65 @@ out:
  *  @bank:  pointer to the variable that returns the active bank
  *
  *  Reads signature byte from the NVM using the flash access registers.
+ *  Word 0x13 bits 15:14 = 10b indicate a valid signature for that bank.
  **/
 static s32 e1000_valid_nvm_bank_detect_ich8lan(struct e1000_hw *hw, u32 *bank)
 {
-	s32 ret_val = E1000_SUCCESS;
+	u32 eecd;
 	struct e1000_nvm_info *nvm = &hw->nvm;
-	/* flash bank size is in words */
 	u32 bank1_offset = nvm->flash_bank_size * sizeof(u16);
 	u32 act_offset = E1000_ICH_NVM_SIG_WORD * 2 + 1;
-	u8 bank_high_byte = 0;
+	u8 sig_byte = 0;
+	s32 ret_val = E1000_SUCCESS;
 
-	if (hw->mac.type != e1000_ich10lan) {
-		if (er32(EECD) & E1000_EECD_SEC1VAL)
-			*bank = 1;
-		else
-			*bank = 0;
-	} else {
-		/*
-		 * Make sure the signature for bank 0 is valid,
-		 * if not check for bank1
-		 */
-		e1000_read_flash_byte_ich8lan(hw, act_offset, &bank_high_byte);
-		if ((bank_high_byte & 0xC0) == 0x80) {
-			*bank = 0;
-		} else {
-			/*
-			 * find if segment 1 is valid by verifying
-			 * bit 15:14 = 10b in word 0x13
-			 */
-			e1000_read_flash_byte_ich8lan(hw,
-			                              act_offset + bank1_offset,
-			                              &bank_high_byte);
-
-			/* bank1 has a valid signature equivalent to SEC1V */
-			if ((bank_high_byte & 0xC0) == 0x80) {
+	switch (hw->mac.type) {
+	case e1000_ich8lan:
+	case e1000_ich9lan:
+		eecd = er32(EECD);
+		if ((eecd & E1000_EECD_SEC1VAL_VALID_MASK) ==
+		    E1000_EECD_SEC1VAL_VALID_MASK) {
+			if (eecd & E1000_EECD_SEC1VAL)
 				*bank = 1;
-			} else {
-				e_dbg("ERROR: EEPROM not present\n");
-				ret_val = -E1000_ERR_NVM;
-			}
-		}
-	}
+			else
+				*bank = 0;
 
+			goto out;
+		}
+		e_dbg("Unable to determine valid NVM bank via EEC - "
+		         "reading flash signature\n");
+		/* fall-thru */
+	default:
+		/* set bank to 0 in case flash read fails */
+		*bank = 0;
+
+		/* Check bank 0 */
+		ret_val = e1000_read_flash_byte_ich8lan(hw, act_offset,
+		                                        &sig_byte);
+		if (ret_val)
+			goto out;
+		if ((sig_byte & E1000_ICH_NVM_VALID_SIG_MASK) ==
+			E1000_ICH_NVM_SIG_VALUE) {
+			*bank = 0;
+			goto out;
+		}
+
+		/* Check bank 1 */
+		ret_val = e1000_read_flash_byte_ich8lan(hw, act_offset +
+		                                        bank1_offset,
+					                &sig_byte);
+		if (ret_val)
+			goto out;
+		if ((sig_byte & E1000_ICH_NVM_VALID_SIG_MASK) ==
+			E1000_ICH_NVM_SIG_VALUE) {
+			*bank = 1;
+			goto out;
+		}
+
+		e_dbg("ERROR: No valid NVM bank present\n");
+		ret_val = -E1000_ERR_NVM;
+		break;
+	}
+out:
 	return ret_val;
 }
 
@@ -1031,7 +1062,7 @@ static s32 e1000_read_nvm_ich8lan(struct e1000_hw *hw, u16 offset, u16 words,
 
 	ret_val = e1000_valid_nvm_bank_detect_ich8lan(hw, &bank);
 	if (ret_val != E1000_SUCCESS)
-		goto out;
+		goto release;
 
 	act_offset = (bank) ? nvm->flash_bank_size : 0;
 	act_offset += offset;
@@ -1050,9 +1081,13 @@ static s32 e1000_read_nvm_ich8lan(struct e1000_hw *hw, u16 offset, u16 words,
 		}
 	}
 
+release:
 	nvm->ops.release(hw);
 
 out:
+	if (ret_val)
+		e_dbg("NVM read error: %d\n", ret_val);
+
 	return ret_val;
 }
 
@@ -1372,17 +1407,27 @@ static s32 e1000_update_nvm_checksum_ich8lan(struct e1000_hw *hw)
 	 * is going to be written
 	 */
 	ret_val =  e1000_valid_nvm_bank_detect_ich8lan(hw, &bank);
-	if (ret_val != E1000_SUCCESS)
+	if (ret_val != E1000_SUCCESS) {
+		nvm->ops.release(hw);
 		goto out;
+	}
 
 	if (bank == 0) {
 		new_bank_offset = nvm->flash_bank_size;
 		old_bank_offset = 0;
-		e1000_erase_flash_bank_ich8lan(hw, 1);
+		ret_val = e1000_erase_flash_bank_ich8lan(hw, 1);
+		if (ret_val) {
+			nvm->ops.release(hw);
+			goto out;
+		}
 	} else {
 		old_bank_offset = nvm->flash_bank_size;
 		new_bank_offset = 0;
-		e1000_erase_flash_bank_ich8lan(hw, 0);
+		ret_val = e1000_erase_flash_bank_ich8lan(hw, 0);
+		if (ret_val) {
+			nvm->ops.release(hw);
+			goto out;
+		}
 	}
 
 	for (i = 0; i < E1000_ICH8_SHADOW_RAM_WORDS; i++) {
@@ -1394,9 +1439,11 @@ static s32 e1000_update_nvm_checksum_ich8lan(struct e1000_hw *hw)
 		if (dev_spec->shadow_ram[i].modified) {
 			data = dev_spec->shadow_ram[i].value;
 		} else {
-			e1000_read_flash_word_ich8lan(hw,
-			                              i + old_bank_offset,
-			                              &data);
+			ret_val = e1000_read_flash_word_ich8lan(hw, i +
+			                                        old_bank_offset,
+			                                        &data);
+			if (ret_val)
+				break;
 		}
 
 		/*
@@ -1446,7 +1493,11 @@ static s32 e1000_update_nvm_checksum_ich8lan(struct e1000_hw *hw)
 	 * and we need to change bit 14 to 0b
 	 */
 	act_offset = new_bank_offset + E1000_ICH_NVM_SIG_WORD;
-	e1000_read_flash_word_ich8lan(hw, act_offset, &data);
+	ret_val = e1000_read_flash_word_ich8lan(hw, act_offset, &data);
+	if (ret_val) {
+		nvm->ops.release(hw);
+		goto out;
+	}
 	data &= 0xBFFF;
 	ret_val = e1000_retry_write_flash_byte_ich8lan(hw,
 	                                               act_offset * 2 + 1,
@@ -1485,6 +1536,9 @@ static s32 e1000_update_nvm_checksum_ich8lan(struct e1000_hw *hw)
 	msleep(10);
 
 out:
+	if (ret_val)
+		e_dbg("NVM update error: %d\n", ret_val);
+
 	return ret_val;
 }
 
@@ -1879,7 +1933,7 @@ static s32 e1000_reset_hw_ich8lan(struct e1000_hw *hw)
 		ctrl |= E1000_CTRL_PHY_RST;
 	}
 	ret_val = e1000_acquire_swflag_ich8lan(hw);
-	e_dbg("Issuing a global reset to ich8lan");
+	e_dbg("Issuing a global reset to ich8lan\n");
 	ew32(CTRL, (ctrl | E1000_CTRL_RST));
 	msleep(20);
 
@@ -1925,11 +1979,10 @@ static s32 e1000_init_hw_ich8lan(struct e1000_hw *hw)
 	e1000_initialize_hw_bits_ich8lan(hw);
 
 	/* Initialize identification LED */
-	ret_val = e1000e_id_led_init(hw);
-	if (ret_val) {
-		e_dbg("Error initializing identification LED\n");
+	ret_val = mac->ops.id_led_init(hw);
+	if (ret_val)
 		/* This is not fatal and we should not stop init due to this */
-	}
+		e_dbg("Error initializing identification LED\n");
 
 	/* Setup the receive address. */
 	e1000e_init_rx_addrs(hw, mac->rar_entry_count);
@@ -2064,7 +2117,7 @@ static s32 e1000_setup_link_ich8lan(struct e1000_hw *hw)
 	hw->fc.current_mode = hw->fc.requested_mode;
 
 	e_dbg("After fix-ups FlowControl is now = %x\n",
-                                                    hw->fc.current_mode);
+		hw->fc.current_mode);
 
 	/* Continue to configure the copper link. */
 	ret_val = hw->mac.ops.setup_physical_interface(hw);

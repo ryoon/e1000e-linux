@@ -37,9 +37,7 @@ static s32  e1000_init_phy_params_80003es2lan(struct e1000_hw *hw);
 static s32  e1000_init_nvm_params_80003es2lan(struct e1000_hw *hw);
 static s32  e1000_init_mac_params_80003es2lan(struct e1000_hw *hw);
 static s32  e1000_acquire_phy_80003es2lan(struct e1000_hw *hw);
-static s32  e1000_acquire_mac_csr_80003es2lan(struct e1000_hw *hw);
 static void e1000_release_phy_80003es2lan(struct e1000_hw *hw);
-static void e1000_release_mac_csr_80003es2lan(struct e1000_hw *hw);
 static s32  e1000_acquire_nvm_80003es2lan(struct e1000_hw *hw);
 static void e1000_release_nvm_80003es2lan(struct e1000_hw *hw);
 static s32  e1000_read_phy_reg_gg82563_80003es2lan(struct e1000_hw *hw,
@@ -264,6 +262,8 @@ static s32 e1000_init_mac_params_80003es2lan(struct e1000_hw *hw)
 	mac->ops.mta_set = e1000_mta_set_generic;
 	/* read mac address */
 	mac->ops.read_mac_addr = e1000_read_mac_addr_80003es2lan;
+	/* ID LED init */
+	mac->ops.id_led_init = e1000e_id_led_init;
 	/* blink LED */
 	mac->ops.blink_led = e1000e_blink_led;
 	/* setup LED */
@@ -762,16 +762,15 @@ static s32 e1000_get_cable_length_80003es2lan(struct e1000_hw *hw)
 
 	index = phy_data & GG82563_DSPD_CABLE_LENGTH;
 
-	if (index < GG82563_CABLE_LENGTH_TABLE_SIZE + 5) {
-		phy->min_cable_length = e1000_gg82563_cable_length_table[index];
-		phy->max_cable_length =
-		                 e1000_gg82563_cable_length_table[index+5];
-
-		phy->cable_length = (phy->min_cable_length +
-		                     phy->max_cable_length) / 2;
-	} else {
+	if (index >= GG82563_CABLE_LENGTH_TABLE_SIZE + 5) {
 		ret_val = E1000_ERR_PHY;
+		goto out;
 	}
+
+	phy->min_cable_length = e1000_gg82563_cable_length_table[index];
+	phy->max_cable_length = e1000_gg82563_cable_length_table[index+5];
+
+	phy->cable_length = (phy->min_cable_length + phy->max_cable_length) / 2;
 
 out:
 	return ret_val;
@@ -870,7 +869,7 @@ static s32 e1000_init_hw_80003es2lan(struct e1000_hw *hw)
 	e1000_initialize_hw_bits_80003es2lan(hw);
 
 	/* Initialize identification LED */
-	ret_val = e1000e_id_led_init(hw);
+	ret_val = mac->ops.id_led_init(hw);
 	if (ret_val) {
 		e_dbg("Error initializing identification LED\n");
 		/* This is not fatal and we should not stop init due to this */
@@ -1054,9 +1053,9 @@ static s32 e1000_copper_link_setup_gg82563_80003es2lan(struct e1000_hw *hw)
 
 	/* Bypass Rx and Tx FIFO's */
 	ret_val = e1000_write_kmrn_reg_80003es2lan(hw,
-	                        E1000_KMRNCTRLSTA_OFFSET_FIFO_CTRL,
-	                        E1000_KMRNCTRLSTA_FIFO_CTRL_RX_BYPASS |
-	                                E1000_KMRNCTRLSTA_FIFO_CTRL_TX_BYPASS);
+					E1000_KMRNCTRLSTA_OFFSET_FIFO_CTRL,
+					E1000_KMRNCTRLSTA_FIFO_CTRL_RX_BYPASS |
+					E1000_KMRNCTRLSTA_FIFO_CTRL_TX_BYPASS);
 	if (ret_val)
 		goto out;
 
@@ -1097,22 +1096,19 @@ static s32 e1000_copper_link_setup_gg82563_80003es2lan(struct e1000_hw *hw)
 	if (!(hw->mac.ops.check_mng_mode(hw))) {
 		/* Enable Electrical Idle on the PHY */
 		data |= GG82563_PMCR_ENABLE_ELECTRICAL_IDLE;
-		ret_val = e1e_wphy(hw,
-		                                GG82563_PHY_PWR_MGMT_CTRL,
+		ret_val = e1e_wphy(hw, GG82563_PHY_PWR_MGMT_CTRL,
 		                                data);
 		if (ret_val)
 			goto out;
-		ret_val = e1e_rphy(hw,
-			                       GG82563_PHY_KMRN_MODE_CTRL,
-			                       &data);
-			if (ret_val)
-				goto out;
+
+		ret_val = e1e_rphy(hw, GG82563_PHY_KMRN_MODE_CTRL,
+		                               &data);
+		if (ret_val)
+			goto out;
 
 		data &= ~GG82563_KMCR_PASS_FALSE_CARRIER;
-		ret_val = e1e_wphy(hw,
-		                                GG82563_PHY_KMRN_MODE_CTRL,
+		ret_val = e1e_wphy(hw, GG82563_PHY_KMRN_MODE_CTRL,
 		                                data);
-
 		if (ret_val)
 			goto out;
 	}
@@ -1207,7 +1203,6 @@ static s32 e1000_cfg_on_link_up_80003es2lan(struct e1000_hw *hw)
 	u16 duplex;
 
 	if (hw->phy.media_type == e1000_media_type_copper) {
-
 		ret_val = e1000e_get_speed_and_duplex_copper(hw,
 		                                                    &speed,
 		                                                    &duplex);

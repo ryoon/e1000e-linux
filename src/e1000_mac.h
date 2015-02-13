@@ -44,6 +44,7 @@ s32  e1000e_disable_pcie_master(struct e1000_hw *hw);
 s32  e1000e_force_mac_fc(struct e1000_hw *hw);
 s32  e1000e_get_auto_rd_done(struct e1000_hw *hw);
 s32  e1000e_get_bus_info_pcie(struct e1000_hw *hw);
+void e1000_set_lan_id_single_port(struct e1000_hw *hw);
 s32  e1000e_get_hw_semaphore(struct e1000_hw *hw);
 s32  e1000e_get_speed_and_duplex_copper(struct e1000_hw *hw, u16 *speed,
                                                u16 *duplex);

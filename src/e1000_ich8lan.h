@@ -64,12 +64,14 @@
 #define E1000_ICH_MNG_IAMT_MODE          0x2
 
 #define ID_LED_DEFAULT_ICH8LAN  ((ID_LED_DEF1_DEF2 << 12) | \
-                                 (ID_LED_DEF1_OFF2 <<  8) | \
-                                 (ID_LED_DEF1_ON2  <<  4) | \
+                                 (ID_LED_OFF1_OFF2 <<  8) | \
+                                 (ID_LED_OFF1_ON2  <<  4) | \
                                  (ID_LED_DEF1_DEF2))
 
 #define E1000_ICH_NVM_SIG_WORD           0x13
 #define E1000_ICH_NVM_SIG_MASK           0xC000
+#define E1000_ICH_NVM_VALID_SIG_MASK     0xC0
+#define E1000_ICH_NVM_SIG_VALUE          0x80
 
 #define E1000_ICH8_LAN_INIT_TIMEOUT      1500
 

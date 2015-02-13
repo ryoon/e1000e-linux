@@ -29,6 +29,7 @@
 #include "e1000.h"
 
 static s32 e1000_phy_setup_autoneg(struct e1000_hw *hw);
+static s32 e1000_copper_link_autoneg(struct e1000_hw *hw);
 static u32 e1000_get_phy_addr_for_bm_page(u32 page, u32 reg);
 static s32 e1000_access_phy_wakeup_reg_bm(struct e1000_hw *hw, u32 offset,
                                           u16 *data, bool read);
@@ -715,7 +716,7 @@ out:
  *  and restart the negotiation process between the link partner.  If
  *  autoneg_wait_to_complete, then wait for autoneg to complete before exiting.
  **/
-s32 e1000_copper_link_autoneg(struct e1000_hw *hw)
+static s32 e1000_copper_link_autoneg(struct e1000_hw *hw)
 {
 	struct e1000_phy_info *phy = &hw->phy;
 	s32 ret_val;
@@ -1541,15 +1542,15 @@ s32 e1000e_get_cable_length_m88(struct e1000_hw *hw)
 
 	index = (phy_data & M88E1000_PSSR_CABLE_LENGTH) >>
 	        M88E1000_PSSR_CABLE_LENGTH_SHIFT;
-	if (index < M88E1000_CABLE_LENGTH_TABLE_SIZE + 1) {
-		phy->min_cable_length = e1000_m88_cable_length_table[index];
-		phy->max_cable_length = e1000_m88_cable_length_table[index+1];
-
-		phy->cable_length = (phy->min_cable_length +
-		                     phy->max_cable_length) / 2;
-	} else {
+	if (index >= M88E1000_CABLE_LENGTH_TABLE_SIZE + 1) {
 		ret_val = E1000_ERR_PHY;
+		goto out;
 	}
+
+	phy->min_cable_length = e1000_m88_cable_length_table[index];
+	phy->max_cable_length = e1000_m88_cable_length_table[index+1];
+
+	phy->cable_length = (phy->min_cable_length + phy->max_cable_length) / 2;
 
 out:
 	return ret_val;
@@ -1998,6 +1999,8 @@ s32 e1000e_determine_phy_address(struct e1000_hw *hw)
 	u32 phy_addr = 0;
 	u32 i;
 	enum e1000_phy_type phy_type = e1000_phy_unknown;
+
+	hw->phy.id = phy_type;
 
 	for (phy_addr = 0; phy_addr < E1000_MAX_PHY_ADDR; phy_addr++) {
 		hw->phy.addr = phy_addr;

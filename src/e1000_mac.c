@@ -33,6 +33,7 @@ static s32 e1000_set_default_fc_generic(struct e1000_hw *hw);
 static s32 e1000_commit_fc_settings_generic(struct e1000_hw *hw);
 static s32 e1000_poll_fiber_serdes_link_generic(struct e1000_hw *hw);
 static s32 e1000_validate_mdi_setting_generic(struct e1000_hw *hw);
+static void e1000_set_lan_id_multi_port_pcie(struct e1000_hw *hw);
 
 /**
  *  e1000_init_mac_ops_generic - Initialize MAC function pointers
@@ -44,6 +45,7 @@ void e1000_init_mac_ops_generic(struct e1000_hw *hw)
 {
 	struct e1000_mac_info *mac = &hw->mac;
 	/* General Setup */
+	mac->ops.set_lan_id = e1000_set_lan_id_multi_port_pcie;
 	mac->ops.read_mac_addr = e1000e_read_mac_addr_generic;
 	mac->ops.config_collision_dist = e1000e_config_collision_dist;
 	/* LINK */
@@ -67,10 +69,11 @@ void e1000_init_mac_ops_generic(struct e1000_hw *hw)
  **/
 s32 e1000e_get_bus_info_pcie(struct e1000_hw *hw)
 {
+	struct e1000_mac_info *mac = &hw->mac;
 	struct e1000_bus_info *bus = &hw->bus;
+
 	s32 ret_val;
-	u32 status;
-	u16 pcie_link_status, pci_header_type;
+	u16 pcie_link_status;
 
 	bus->type = e1000_bus_type_pci_express;
 	bus->speed = e1000_bus_speed_2500;
@@ -85,16 +88,43 @@ s32 e1000e_get_bus_info_pcie(struct e1000_hw *hw)
 		                                PCIE_LINK_WIDTH_MASK) >>
 		                               PCIE_LINK_WIDTH_SHIFT);
 
-	e1000_read_pci_cfg(hw, PCI_HEADER_TYPE_REGISTER, &pci_header_type);
-	if (pci_header_type & PCI_HEADER_TYPE_MULTIFUNC) {
-		status = er32(STATUS);
-		bus->func = (status & E1000_STATUS_FUNC_MASK)
-		            >> E1000_STATUS_FUNC_SHIFT;
-	} else {
-		bus->func = 0;
-	}
+	mac->ops.set_lan_id(hw);
 
 	return E1000_SUCCESS;
+}
+
+/**
+ *  e1000_set_lan_id_multi_port_pcie - Set LAN id for PCIe multiple port devices
+ *
+ *  @hw: pointer to the HW structure
+ *
+ *  Determines the LAN function id by reading memory-mapped registers
+ *  and swaps the port value if requested.
+ **/
+static void e1000_set_lan_id_multi_port_pcie(struct e1000_hw *hw)
+{
+	struct e1000_bus_info *bus = &hw->bus;
+	u32 reg;
+
+	/*
+	 * The status register reports the correct function number
+	 * for the device regardless of function swap state.
+	 */
+	reg = er32(STATUS);
+	bus->func = (reg & E1000_STATUS_FUNC_MASK) >> E1000_STATUS_FUNC_SHIFT;
+}
+
+/**
+ *  e1000_set_lan_id_single_port - Set LAN id for a single port device
+ *  @hw: pointer to the HW structure
+ *
+ *  Sets the LAN function id to zero for a single port device.
+ **/
+void e1000_set_lan_id_single_port(struct e1000_hw *hw)
+{
+	struct e1000_bus_info *bus = &hw->bus;
+
+	bus->func = 0;
 }
 
 /**
@@ -244,7 +274,13 @@ void e1000e_rar_set(struct e1000_hw *hw, u8 *addr, u32 index)
 	if (rar_low || rar_high)
 		rar_high |= E1000_RAH_AV;
 
+	/*
+	 * Some bridges will combine consecutive 32-bit writes into
+	 * a single burst write, which will malfunction on some
+	 * 82546 parts.  The flush avoids this.
+	 */
 	ew32(RAL(index), rar_low);
+	e1e_flush();
 	ew32(RAH(index), rar_high);
 }
 
@@ -746,7 +782,7 @@ s32 e1000e_setup_link(struct e1000_hw *hw)
 	hw->fc.current_mode = hw->fc.requested_mode;
 
 	e_dbg("After fix-ups FlowControl is now = %x\n",
-	                                             hw->fc.current_mode);
+		hw->fc.current_mode);
 
 	/* Call the necessary media_type subroutine to configure the link. */
 	ret_val = hw->mac.ops.setup_physical_interface(hw);
