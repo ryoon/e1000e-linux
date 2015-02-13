@@ -61,7 +61,7 @@
 #define DRV_EXTRAVERSION 
 #endif
 
-#define DRV_VERSION "1.4.4" DRV_EXTRAVERSION
+#define DRV_VERSION "1.5.1" DRV_EXTRAVERSION
 char e1000e_driver_name[] = "e1000e";
 const char e1000e_driver_version[] = DRV_VERSION;
 
@@ -260,7 +260,7 @@ static s32 e1000_get_variants_ich8lan(struct e1000_adapter *adapter)
 	/* Enable workaround for 82579 w/ ME enabled */
 	if ((adapter->hw.mac.type == e1000_pch2lan) &&
 	    (er32(FWSM) & E1000_ICH_FWSM_FW_VALID))
-		adapter->flags2 |= FLAG2_TDT_OVERWRITE_WA;
+		adapter->flags2 |= FLAG2_PCIM2PCI_ARBITER_WA;
 
 	return 0;
 }
@@ -854,6 +854,63 @@ static void e1000_rx_checksum(struct e1000_adapter *adapter, u32 status_err,
 }
 
 /**
+ * e1000e_update_tail_wa - helper function for e1000e_update_[rt]dt_wa()
+ * @hw: pointer to the HW structure
+ * @tail: address of tail descriptor register
+ * @i: value to write to tail descriptor register
+ *
+ * When updating the tail register, the ME could be accessing Host CSR
+ * registers at the same time.  Normally, this is handled in h/w by an
+ * arbiter but on some parts there is a bug that acknowledges Host accesses
+ * later than it should which could result in the descriptor register to
+ * have an incorrect value.  Workaround this by checking the FWSM register
+ * which has bit 24 set while ME is accessing Host CSR registers, wait
+ * if it is set and try again a number of times.
+ **/
+static inline s32 e1000e_update_tail_wa(struct e1000_hw *hw, u8 __iomem *tail,
+					unsigned int i)
+{
+	unsigned int j = 0;
+
+	while ((j++ < E1000_ICH_FWSM_PCIM2PCI_COUNT) &&
+	       (er32(FWSM) & E1000_ICH_FWSM_PCIM2PCI))
+		udelay(50);
+
+	writel(i, tail);
+
+	if ((j == E1000_ICH_FWSM_PCIM2PCI_COUNT) && (i != readl(tail)))
+		return E1000_ERR_SWFW_SYNC;
+
+	return 0;
+}
+
+static void e1000e_update_rdt_wa(struct e1000_adapter *adapter, unsigned int i)
+{
+	u8 __iomem *tail = (adapter->hw.hw_addr + adapter->rx_ring->tail);
+	struct e1000_hw *hw =  &adapter->hw;
+
+	if (e1000e_update_tail_wa(hw, tail, i)) {
+		u32 rctl = er32(RCTL);
+		ew32(RCTL, rctl & ~E1000_RCTL_EN);
+		e_err("ME firmware caused invalid RDT - resetting\n");
+		schedule_work(&adapter->reset_task);
+	}
+}
+
+static void e1000e_update_tdt_wa(struct e1000_adapter *adapter, unsigned int i)
+{
+	u8 __iomem *tail = (adapter->hw.hw_addr + adapter->tx_ring->tail);
+	struct e1000_hw *hw =  &adapter->hw;
+
+	if (e1000e_update_tail_wa(hw, tail, i)) {
+		u32 tctl = er32(TCTL);
+		ew32(TCTL, tctl & ~E1000_TCTL_EN);
+		e_err("ME firmware caused invalid TDT - resetting\n");
+		schedule_work(&adapter->reset_task);
+	}
+}
+
+/**
  * e1000_alloc_rx_buffers - Replace used receive buffers
  * @adapter: address of board private structure
  **/
@@ -908,7 +965,10 @@ map_skb:
 			 * such as IA-64).
 			 */
 			wmb();
-			writel(i, adapter->hw.hw_addr + rx_ring->tail);
+			if (adapter->flags2 & FLAG2_PCIM2PCI_ARBITER_WA)
+				e1000e_update_rdt_wa(adapter, i);
+			else
+				writel(i, adapter->hw.hw_addr + rx_ring->tail);
 		}
 		i++;
 		if (i == rx_ring->count)
@@ -1019,7 +1079,11 @@ map_skb:
 			 * such as IA-64).
 			 */
 			wmb();
-			writel(i << 1, adapter->hw.hw_addr + rx_ring->tail);
+			if (adapter->flags2 & FLAG2_PCIM2PCI_ARBITER_WA)
+				e1000e_update_rdt_wa(adapter, i << 1);
+			else
+				writel(i << 1,
+				       adapter->hw.hw_addr + rx_ring->tail);
 		}
 
 		i++;
@@ -1104,7 +1168,10 @@ check_page:
 		 * applicable for weak-ordered memory model archs,
 		 * such as IA-64). */
 		wmb();
-		writel(i, adapter->hw.hw_addr + rx_ring->tail);
+		if (adapter->flags2 & FLAG2_PCIM2PCI_ARBITER_WA)
+			e1000e_update_rdt_wa(adapter, i);
+		else
+			writel(i, adapter->hw.hw_addr + rx_ring->tail);
 	}
 }
 #endif /* CONFIG_E1000E_NAPI */
@@ -3001,9 +3068,6 @@ static void e1000_vlan_rx_add_vid(struct net_device *netdev, u16 vid)
 	struct e1000_adapter *adapter = netdev_priv(netdev);
 	struct e1000_hw *hw = &adapter->hw;
 	u32 vfta, index;
-#ifndef HAVE_NETDEV_VLAN_FEATURES
-	struct net_device *v_netdev;
-#endif
 
 	/* don't update vlan cookie if already programmed */
 	if ((adapter->hw.mng_cookie.status &
@@ -3024,9 +3088,14 @@ static void e1000_vlan_rx_add_vid(struct net_device *netdev, u16 vid)
 	 * Copy feature flags from netdev to the vlan netdev for this vid.
 	 * This allows things like TSO to bubble down to our vlan device.
 	 */
-	v_netdev = vlan_group_get_device(adapter->vlgrp, vid);
-	v_netdev->features |= adapter->netdev->features;
-	vlan_group_set_device(adapter->vlgrp, vid, v_netdev);
+	if (adapter->vlgrp) {
+		struct vlan_group *vlgrp = adapter->vlgrp;
+		struct net_device *v_netdev = vlan_group_get_device(vlgrp, vid);
+		if (v_netdev) {
+			v_netdev->features |= netdev->features;
+			vlan_group_set_device(vlgrp, vid, v_netdev);
+		}
+	}
 #endif /* HAVE_NETDEV_VLAN_FEATURES */
 }
 
@@ -5421,19 +5490,13 @@ static void e1000_tx_queue(struct e1000_adapter *adapter,
 	 */
 	wmb();
 
-#define E1000_ICH_FWSM_PCIM2PCI_COUNT	2000
-#define E1000_ICH_FWSM_PCIM2PCI		0x01000000
-	if (adapter->flags2 & FLAG2_TDT_OVERWRITE_WA) {
-		struct e1000_hw *hw =  &adapter->hw;
-		unsigned int j = 0;
-
-		while ((j++ <= E1000_ICH_FWSM_PCIM2PCI_COUNT) &&
-		       (er32(FWSM) & E1000_ICH_FWSM_PCIM2PCI))
-			udelay(50);
-	}
-
 	tx_ring->next_to_use = i;
-	writel(i, adapter->hw.hw_addr + tx_ring->tail);
+
+	if (adapter->flags2 & FLAG2_PCIM2PCI_ARBITER_WA)
+		e1000e_update_tdt_wa(adapter, i);
+	else
+		writel(i, adapter->hw.hw_addr + tx_ring->tail);
+
 	/*
 	 * we need this if more than one processor can write to our tail
 	 * at a time, it synchronizes IO on IA64/Altix systems

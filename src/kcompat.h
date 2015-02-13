@@ -54,6 +54,7 @@
 #include <linux/vmalloc.h>
 #include <asm/io.h>
 #include <linux/ethtool.h>
+#include <linux/if_vlan.h>
 
 /* NAPI enable/disable flags here */
 #define NAPI
@@ -165,7 +166,7 @@ struct msix_entry {
 #define SET_NETDEV_DEV(net, pdev)
 #endif
 
-#ifndef HAVE_FREE_NETDEV
+#if !defined(HAVE_FREE_NETDEV) && ( LINUX_VERSION_CODE < KERNEL_VERSION(3,1,0) )
 #define free_netdev(x)	kfree(x)
 #endif
 
@@ -211,7 +212,7 @@ struct msix_entry {
 #define __read_mostly
 #endif
 
-#ifndef HAVE_NETIF_MSG
+#if !defined(HAVE_NETIF_MSG) && ( LINUX_VERSION_CODE < KERNEL_VERSION(3,1,0) )
 #define HAVE_NETIF_MSG 1
 enum {
 	NETIF_MSG_DRV		= 0x0001,
@@ -244,10 +245,10 @@ enum {
 #define netif_msg_tx_done(p)	((p)->msg_enable & NETIF_MSG_TX_DONE)
 #define netif_msg_rx_status(p)	((p)->msg_enable & NETIF_MSG_RX_STATUS)
 #define netif_msg_pktdata(p)	((p)->msg_enable & NETIF_MSG_PKTDATA)
-#else /* HAVE_NETIF_MSG */
+#else /* !HAVE_NETIF_MSG && < 3.1.0 */
 #define NETIF_MSG_HW	0x2000
 #define NETIF_MSG_WOL	0x4000
-#endif /* HAVE_NETIF_MSG */
+#endif /* !HAVE_NETIF_MSG && < 3.1.0 */
 #ifndef netif_msg_hw
 #define netif_msg_hw(p)		((p)->msg_enable & NETIF_MSG_HW)
 #endif
@@ -716,6 +717,13 @@ struct _kc_ethtool_pauseparam {
 #define SLE_VERSION_CODE 0
 #endif /* CONFIG_SUSE_KERNEL */
 #endif /* SLE_VERSION_CODE */
+
+#ifdef __KLOCWORK__
+#ifdef ARRAY_SIZE
+#undef ARRAY_SIZE
+#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+#endif
+#endif /* __KLOCWORK__ */
 
 /*****************************************************************************/
 /* 2.4.3 => 2.4.0 */
@@ -2581,6 +2589,20 @@ static inline void *_kc_vzalloc(unsigned long size)
 }
 #define vzalloc(_size) _kc_vzalloc(_size)
 
+#ifndef vlan_get_protocol
+static inline __be16 __kc_vlan_get_protocol(const struct sk_buff *skb)
+{
+	if (vlan_tx_tag_present(skb) ||
+	    skb->protocol != cpu_to_be16(ETH_P_8021Q))
+		return skb->protocol;
+
+	if (skb_headlen(skb) < sizeof(struct vlan_ethhdr))
+		return 0;
+
+	return ((struct vlan_ethhdr*)skb->data)->h_vlan_encapsulated_proto;
+}
+#define vlan_get_protocol(_skb) __kc_vlan_get_protocol(_skb)
+#endif
 #ifdef HAVE_HW_TIME_STAMP
 #define SKBTX_HW_TSTAMP (1 << 0)
 #define SKBTX_IN_PROGRESS (1 << 2)
@@ -2624,8 +2646,6 @@ static inline int _kc_skb_checksum_start_offset(const struct sk_buff *skb)
 
 /*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,39) )
-#if (!(RHEL_RELEASE_CODE && RHEL_RELEASE_CODE > RHEL_RELEASE_VERSION(6,0)))
-#endif /* !(RHEL_RELEASE_CODE > RHEL_RELEASE_VERSION(6,0)) */
 #else /* < 2.6.39 */
 #if defined(CONFIG_FCOE) || defined(CONFIG_FCOE_MODULE)
 #ifndef HAVE_NETDEV_OPS_FCOE_DDP_TARGET
@@ -2634,6 +2654,9 @@ static inline int _kc_skb_checksum_start_offset(const struct sk_buff *skb)
 #endif /* CONFIG_FCOE || CONFIG_FCOE_MODULE */
 #ifndef HAVE_MQPRIO
 #define HAVE_MQPRIO
+#endif
+#ifndef HAVE_SETUP_TC
+#define HAVE_SETUP_TC
 #endif
 #endif /* < 2.6.39 */
 
@@ -2670,5 +2693,11 @@ struct _kc_ethtool_rx_flow_spec {
 #else /* < 3.0.0 */
 #define HAVE_ETHTOOL_SET_PHYS_ID
 #endif /* < 3.0.0 */
+
+/*****************************************************************************/
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(3,1,0) )
+#else /* < 3.1.0 */
+#define HAVE_NET_DEVICE_OPS
+#endif /* < 3.1.0 */
 
 #endif /* _KCOMPAT_H_ */

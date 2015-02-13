@@ -176,6 +176,7 @@ static void e1000_toggle_lanphypc_value_ich8lan(struct e1000_hw *hw)
 	ctrl |= E1000_CTRL_LANPHYPC_OVERRIDE;
 	ctrl &= ~E1000_CTRL_LANPHYPC_VALUE;
 	ew32(CTRL, ctrl);
+	e1e_flush();
 	udelay(10);
 	ctrl &= ~E1000_CTRL_LANPHYPC_OVERRIDE;
 	ew32(CTRL, ctrl);
@@ -1225,9 +1226,11 @@ s32 e1000_configure_k1_ich8lan(struct e1000_hw *hw, bool k1_enable)
 	ew32(CTRL, reg);
 
 	ew32(CTRL_EXT, ctrl_ext | E1000_CTRL_EXT_SPD_BYPS);
+	e1e_flush();
 	udelay(20);
 	ew32(CTRL, ctrl_reg);
 	ew32(CTRL_EXT, ctrl_ext);
+	e1e_flush();
 	udelay(20);
 
 out:
@@ -1640,6 +1643,7 @@ static s32 e1000_k1_workaround_lv(struct e1000_hw *hw)
 	s32 ret_val = 0;
 	u16 status_reg = 0;
 	u32 mac_reg;
+	u16 phy_reg;
 
 	if (hw->mac.type != e1000_pch2lan)
 		goto out;
@@ -1654,12 +1658,19 @@ static s32 e1000_k1_workaround_lv(struct e1000_hw *hw)
 		mac_reg = er32(FEXTNVM4);
 		mac_reg &= ~E1000_FEXTNVM4_BEACON_DURATION_MASK;
 
-		if (status_reg & HV_M_STATUS_SPEED_1000)
-			mac_reg |= E1000_FEXTNVM4_BEACON_DURATION_8USEC;
-		else
-			mac_reg |= E1000_FEXTNVM4_BEACON_DURATION_16USEC;
+		ret_val = e1e_rphy(hw, I82579_LPI_CTRL, &phy_reg);
+		if (ret_val)
+			goto out;                
 
+		if (status_reg & HV_M_STATUS_SPEED_1000) {
+			mac_reg |= E1000_FEXTNVM4_BEACON_DURATION_8USEC;
+			phy_reg &= ~I82579_LPI_CTRL_FORCE_PLL_LOCK_COUNT;
+		} else {
+			mac_reg |= E1000_FEXTNVM4_BEACON_DURATION_16USEC;
+			phy_reg |= I82579_LPI_CTRL_FORCE_PLL_LOCK_COUNT;
+		}
 		ew32(FEXTNVM4, mac_reg);
+		ret_val = e1e_wphy(hw, I82579_LPI_CTRL, phy_reg);
 	}
 
 out:
@@ -3090,6 +3101,7 @@ static s32 e1000_reset_hw_ich8lan(struct e1000_hw *hw)
 	ret_val = e1000_acquire_swflag_ich8lan(hw);
 	e_dbg("Issuing a global reset to ich8lan\n");
 	ew32(CTRL, (ctrl | E1000_CTRL_RST));
+	/* cannot issue a flush here because it hangs the hardware */
 	msleep(20);
 
 	if (!ret_val)
