@@ -1668,6 +1668,15 @@ extern void *_kc_kzalloc(size_t size, int flags);
 typedef unsigned gfp_t;
 #endif
 #endif /* !RHEL4.3->RHEL5.0 */
+
+#if ( LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,9) )
+#ifdef CONFIG_X86_64
+#define dma_sync_single_range_for_cpu(dev, dma_handle, offset, size, dir)       \
+	dma_sync_single_for_cpu(dev, dma_handle, size, dir)
+#define dma_sync_single_range_for_device(dev, dma_handle, offset, size, dir)    \
+	dma_sync_single_for_device(dev, dma_handle, size, dir)
+#endif
+#endif
 #endif /* < 2.6.14 */
 
 /*****************************************************************************/
@@ -2369,13 +2378,12 @@ extern void _kc_skb_add_rx_frag(struct sk_buff *, int, struct page *, int, int);
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,30) )
 #define skb_rx_queue_recorded(a) false
 #define skb_get_rx_queue(a) 0
+#define skb_record_rx_queue(a, b) do {} while (0)
+#define skb_tx_hash(n, s) ___kc_skb_tx_hash((n), (s), (n)->real_num_tx_queues)
 #ifdef IXGBE_FCOE
 #undef CONFIG_FCOE
 #undef CONFIG_FCOE_MODULE
 #endif /* IXGBE_FCOE */
-extern u16 _kc_skb_tx_hash(struct net_device *dev, struct sk_buff *skb);
-#define skb_tx_hash(n, s) _kc_skb_tx_hash(n, s)
-#define skb_record_rx_queue(a, b) do {} while (0)
 #ifndef CONFIG_PCI_IOV
 #undef pci_enable_sriov
 #define pci_enable_sriov(a, b) -ENOTSUPP
@@ -2840,6 +2848,9 @@ static inline int _kc_skb_checksum_start_offset(const struct sk_buff *skb)
 #define skb_checksum_start_offset(skb) _kc_skb_checksum_start_offset(skb)
 #endif /* 2.6.22 -> 2.6.37 */
 #ifdef CONFIG_DCB
+#ifndef IEEE_8021QAZ_MAX_TCS
+#define IEEE_8021QAZ_MAX_TCS 8
+#endif
 #ifndef DCB_CAP_DCBX_HOST
 #define DCB_CAP_DCBX_HOST		0x01
 #endif
@@ -2856,6 +2867,8 @@ static inline int _kc_skb_checksum_start_offset(const struct sk_buff *skb)
 #define DCB_CAP_DCBX_STATIC		0x10
 #endif
 #endif /* CONFIG_DCB */
+extern u16 ___kc_skb_tx_hash(struct net_device *, const struct sk_buff *, u16);
+#define __skb_tx_hash(n, s, q) ___kc_skb_tx_hash((n), (s), (q))
 #else /* < 2.6.38 */
 #endif /* < 2.6.38 */
 
@@ -3031,4 +3044,39 @@ typedef u32 netdev_features_t;
 #endif
 #endif /* < 3.3.0 */
 
+/*****************************************************************************/
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(3,4,0) )
+#ifndef NETIF_F_RXFCS
+#define NETIF_F_RXFCS	0
+#endif /* NETIF_F_RXFCS */
+#ifndef NETIF_F_RXALL
+#define NETIF_F_RXALL	0
+#endif /* NETIF_F_RXALL */
+
+#define NUMTCS_RETURNS_U8
+
+#include <linux/highmem.h>
+static inline void *_kc_kmap_atomic(struct page *page)
+{
+	return kmap_atomic(page, KM_SKB_DATA_SOFTIRQ);
+}
+
+#undef kmap_atomic
+#define kmap_atomic(page) _kc_kmap_atomic((page))
+
+static inline void _kc_kunmap_atomic(void *addr)
+{
+	kunmap_atomic(addr, KM_SKB_DATA_SOFTIRQ);
+}
+
+#undef kunmap_atomic
+#define kunmap_atomic(addr) _kc_kunmap_atomic((addr))
+
+#endif /* < 3.4.0 */
+
+/*****************************************************************************/
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(3,5,0) )
+#else
+#define HAVE_FDB_OPS
+#endif /* < 3.5.0 */
 #endif /* _KCOMPAT_H_ */

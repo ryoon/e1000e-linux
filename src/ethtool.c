@@ -300,8 +300,7 @@ static int e1000_set_settings(struct net_device *netdev,
 	 * cannot be changed
 	 */
 	if (hw->phy.ops.check_reset_block(hw)) {
-		e_err("Cannot change link characteristics when SoL/IDER is "
-		      "active.\n");
+		e_err("Cannot change link characteristics when SoL/IDER is active.\n");
 		return -EINVAL;
 	}
 
@@ -317,14 +316,8 @@ static int e1000_set_settings(struct net_device *netdev,
 			hw->phy.autoneg_advertised = ecmd->advertising |
 			    ADVERTISED_TP | ADVERTISED_Autoneg;
 		ecmd->advertising = hw->phy.autoneg_advertised;
-		if (adapter->fc_autoneg) {
-			if (hw->mac.type == e1000_pchlan) {
-				/* Workaround h/w hang when Tx fc enabled */
-				hw->fc.requested_mode = e1000_fc_rx_pause;
-			} else {
-				hw->fc.requested_mode = e1000_fc_default;
-			}
-		}
+		if (adapter->fc_autoneg)
+			hw->fc.requested_mode = e1000_fc_default;
 	} else {
 		u32 speed = ethtool_cmd_speed(ecmd);
 		if (e1000_set_spd_dplx(adapter, speed, ecmd->duplex)) {
@@ -378,12 +371,7 @@ static int e1000_set_pauseparam(struct net_device *netdev,
 		usleep_range(1000, 2000);
 
 	if (adapter->fc_autoneg == AUTONEG_ENABLE) {
-		if (hw->mac.type == e1000_pchlan) {
-			/* Workaround h/w hang when Tx flow control enabled */
-			hw->fc.requested_mode = e1000_fc_rx_pause;
-		} else {
-			hw->fc.requested_mode = e1000_fc_default;
-		}
+		hw->fc.requested_mode = e1000_fc_default;
 		if (netif_running(adapter->netdev)) {
 			e1000e_down(adapter);
 			e1000e_up(adapter);
@@ -890,9 +878,8 @@ static bool reg_pattern_test(struct e1000_adapter *adapter, u64 *data,
 				      (test[pat] & write));
 		val = E1000_READ_REG_ARRAY(&adapter->hw, reg, offset);
 		if (val != (test[pat] & write & mask)) {
-			e_err("pattern test reg %04X failed: got 0x%08X "
-			      "expected 0x%08X\n", reg + offset, val,
-			      (test[pat] & write & mask));
+			e_err("pattern test reg %04X failed: got 0x%08X expected 0x%08X\n",
+			     reg + offset, val, (test[pat] & write & mask));
 			*data = reg;
 			return 1;
 		}
@@ -907,8 +894,8 @@ static bool reg_set_and_check(struct e1000_adapter *adapter, u64 *data,
 	__ew32(&adapter->hw, reg, write & mask);
 	val = __er32(&adapter->hw, reg);
 	if ((write & mask) != (val & mask)) {
-		e_err("set/check reg %04X test failed: got 0x%08X "
-		      "expected 0x%08X\n", reg, (val & mask), (write & mask));
+		e_err("set/check reg %04X test failed: got 0x%08X expected 0x%08X\n",
+		     reg, (val & mask), (write & mask));
 		*data = reg;
 		return 1;
 	}
@@ -939,6 +926,7 @@ static int e1000_reg_test(struct e1000_adapter *adapter, u64 *data)
 	u32 i;
 	u32 toggle;
 	u32 mask;
+	u32 wlock_mac = 0;
 
 	/*
 	 * The status register is Read Only, so a write should fail.
@@ -961,8 +949,8 @@ static int e1000_reg_test(struct e1000_adapter *adapter, u64 *data)
 	ew32(STATUS, toggle);
 	after = er32(STATUS) & toggle;
 	if (value != after) {
-		e_err("failed STATUS register test got: 0x%08X expected: "
-		      "0x%08X\n", after, value);
+		e_err("failed STATUS register test got: 0x%08X expected: 0x%08X\n",
+		     after, value);
 		*data = 1;
 		return 1;
 	}
@@ -1004,19 +992,31 @@ static int e1000_reg_test(struct e1000_adapter *adapter, u64 *data)
 	case e1000_ich10lan:
 	case e1000_pchlan:
 	case e1000_pch2lan:
+	case e1000_pch_lpt:
 		mask |= (1 << 18);
 		break;
 	default:
 		break;
 	}
-	for (i = 0; i < mac->rar_entry_count; i++)
+
+	if (mac->type == e1000_pch_lpt)
+		wlock_mac = (er32(FWSM) & E1000_FWSM_WLOCK_MAC_MASK) >>
+		    E1000_FWSM_WLOCK_MAC_SHIFT;
+
+	for (i = 0; i < mac->rar_entry_count; i++) {
+		/* Cannot test write-protected SHRAL[n] registers */
+		if ((wlock_mac == 1) || (wlock_mac && (i > wlock_mac)))
+			continue;
+
 		REG_PATTERN_TEST_ARRAY(E1000_RA, ((i << 1) + 1),
 				       mask, 0xFFFFFFFF);
+	}
 
 	for (i = 0; i < mac->mta_reg_count; i++)
 		REG_PATTERN_TEST_ARRAY(E1000_MTA, i, 0xFFFFFFFF, 0xFFFFFFFF);
 
 	*data = 0;
+
 	return 0;
 }
 
@@ -1965,8 +1965,7 @@ static void e1000_get_wol(struct net_device *netdev,
 		wol->supported &= ~WAKE_UCAST;
 
 		if (adapter->wol & E1000_WUFC_EX)
-			e_err("Interface does not support directed (unicast) "
-			      "frame wake-up packets\n");
+			e_err("Interface does not support directed (unicast) frame wake-up packets\n");
 	}
 
 	if (adapter->wol & E1000_WUFC_EX)
@@ -2080,6 +2079,7 @@ static int e1000_phys_id(struct net_device *netdev, u32 data)
 	if ((hw->phy.type == e1000_phy_ife) ||
 	    (hw->mac.type == e1000_pchlan) ||
 	    (hw->mac.type == e1000_pch2lan) ||
+	    (hw->mac.type == e1000_pch_lpt) ||
 	    (hw->mac.type == e1000_82583) || (hw->mac.type == e1000_82574)) {
 		if (!adapter->blink_timer.function) {
 			init_timer(&adapter->blink_timer);

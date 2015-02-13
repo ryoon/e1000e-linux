@@ -85,4 +85,6 @@
 	1503  82579V Gigabit Network Connection
 	150c  82583V Gigabit Network Connection
 	1525  82567V-4 Gigabit Network Connection
+	153a  i217LM Gigabit Network Connection	// TODO - verify in subsys db
+	153b  i217V Gigabit Network Connection	// TODO - verify in subsys db
 	294c  82566DC-2 Gigabit Network Connection
