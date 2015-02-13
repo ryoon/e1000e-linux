@@ -15,7 +15,6 @@ Contents
 - Known Issues/Troubleshooting
 - Support
 
-
 In This Release
 ===============
 
@@ -25,15 +24,11 @@ support for Itanium(R)2-based systems.
 
 NOTE: The 82546GB part requires the e1000 driver, not the e1000e driver.
  
-This drIntel(R) 82567V-3 Gigabit Network Connectioniver is only supported as a loadable module at this time.  Intel is
+This driver is only supported as a loadable module at this time.  Intel is
 not supplying patches against the kernel source to allow for static linking
 of the driver.  For questions related to hardware requirements, refer to the
 documentation supplied with your Intel Gigabit adapter.  All hardware
 requirements listed apply to use with Linux.
-
-This release includes support for Intel(R) I/O Acceleration Technology,
-Intel(R) I/OAT. You can find additional information on Intel I/OAT at 
-http://www.intel.com/technology/ioacceleration/index.htm.
 
 The following features are now available in supported kernels:
  - Native VLANs
@@ -52,7 +47,6 @@ Configurations" later in this document.
 
 NOTE: The Intel(R) 82562v 10/100 Network Connection only provides 10/100
 support.
-
 
 Identifying Your Adapter
 ========================
@@ -134,7 +128,6 @@ NOTE: For the build to work properly, the currently running kernel MUST
 
      rmmod e1000e; modprobe e1000e
 
-
 6. Assign an IP address to the interface by entering the following, where
    x is the interface number:
 
@@ -156,7 +149,6 @@ Normally the driver will generate an interrupt every two seconds, so if
 you can see that you're no longer getting interrupts in
 cat /proc/interrupts for the ethX e1000e device, then this workaround
 may be necessary.
-	
 
 Command Line Parameters
 =======================
@@ -177,7 +169,6 @@ NOTES:  For more information about the InterruptThrottleRate,
 
         A descriptor describes a data buffer and attributes related to
         the data buffer.  This information is accessed by the hardware.
-
 
 InterruptThrottleRate
 ---------------------
@@ -251,7 +242,6 @@ NOTE:  When e1000e is loaded with default settings and multiple adapters
        be platform-specific.  If CPU utilization is not a concern, use
        RX_POLLING (NAPI) and default driver settings.
 
-
 RxIntDelay
 ----------
 Valid Range:   0-65535 (0=off)
@@ -272,7 +262,6 @@ CAUTION:  When setting RxIntDelay to a value other than 0, adapters may
           restoring the network connection.  To eliminate the potential
           for the hang ensure that RxIntDelay is set to 0.
 
-
 RxAbsIntDelay
 -------------
 Valid Range:   0-65535 (0=off)
@@ -285,7 +274,6 @@ packet is received within the set amount of time.  Proper tuning,
 along with RxIntDelay, may improve traffic throughput in specific network
 conditions.
 
-
 TxIntDelay
 ----------
 Valid Range:   0-65535 (0=off)
@@ -296,7 +284,6 @@ This value delays the generation of transmit interrupts in units of
 efficiency if properly tuned for specific network traffic.  If the
 system is reporting dropped transmits, this value may be set too high
 causing the driver to run out of available transmit descriptors.
-
 
 TxAbsIntDelay
 -------------
@@ -309,7 +296,6 @@ this value ensures that an interrupt is generated after the initial
 packet is sent on the wire within the set amount of time.  Proper tuning,
 along with TxIntDelay, may improve traffic throughput in specific
 network conditions.
-
 
 copybreak
 ---------
@@ -325,7 +311,6 @@ single (not 1,1,1 etc.) parameter applied to all driver instances and
 it is also available during runtime at 
 /sys/module/e1000e/parameters/copybreak
 
-
 SmartPowerDownEnable
 --------------------
 Valid Range: 0-1
@@ -334,7 +319,6 @@ Default Value:  0 (disabled)
 Allows Phy to turn off in lower power states. The user can turn off
 this parameter in supported chipsets.
 
-
 KumeranLockLoss
 ---------------
 Valid Range: 0-1
@@ -342,7 +326,6 @@ Default Value: 1 (enabled)
 
 This workaround skips resetting the Phy at shutdown for the initial
 silicon releases of ICH8 systems.
-
 
 IntMode
 -------
@@ -355,7 +338,6 @@ driver will try other interrupt modes, from least to most compatible.  The
 interrupt order is MSI-X, MSI, Legacy.  If specifying MSI (IntMode=1) 
 interrupts, only MSI and Legacy will be attempted.
 
-
 CrcStripping
 ------------
 Valid Range: 0-1
@@ -364,7 +346,6 @@ Default Value: 1 (enabled)
 Strip the CRC from received packets before sending up the network stack.  If 
 you have a machine with a BMC enabled but cannot receive IPMI traffic after
 loading or enabling the driver, try disabling this feature.
-
 
 Additional Configurations
 =========================
@@ -509,7 +490,6 @@ Additional Configurations
 
   With this option, you would get three MSI-X vectors: one for TX, one for RX, 
   and one for link.
-
 
 Known Issues/Troubleshooting
 ============================
@@ -688,8 +668,6 @@ If an issue is identified with the released source code on the supported
 kernel with a supported adapter, email the specific information related
 to the issue to e1000-devel@lists.sf.net
 
-
-
 License
 =======
 
@@ -711,8 +689,6 @@ this program; if not, write to the Free Software Foundation, Inc.,
 
 The full GNU General Public License is included in this distribution in
 the file called "COPYING".
-
-
 
 Trademarks
 ==========

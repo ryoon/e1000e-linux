@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   Intel PRO/1000 Linux driver
-  Copyright(c) 1999 - 2009 Intel Corporation.
+  Copyright(c) 1999 - 2010 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms and conditions of the GNU General Public License,
@@ -110,12 +110,12 @@ enum e1000_boards {
 	board_82572,
 	board_82573,
 	board_82574,
+	board_82583,
 	board_80003es2lan,
 	board_ich8lan,
 	board_ich9lan,
 	board_ich10lan,
 	board_pchlan,
-	board_82583,
 };
 
 struct e1000_queue_stats {
@@ -141,12 +141,15 @@ struct e1000_buffer {
 			unsigned long time_stamp;
 			u16 length;
 			u16 next_to_watch;
+			u16 mapped_as_page;
 		};
 		/* Rx */
-		/* arrays of page information for packet split */
-		struct e1000_ps_page *ps_pages;
+		struct {
+			/* arrays of page information for packet split */
+			struct e1000_ps_page *ps_pages;
+			struct page *page;
+		};
 	};
-	struct page *page;
 };
 
 struct e1000_ring {
@@ -229,7 +232,6 @@ struct e1000_adapter {
 	struct napi_struct napi;
 #endif
 
-	unsigned long tx_queue_len;
 	unsigned int restart_queue;
 	u32 txd_cmd;
 
@@ -293,7 +295,9 @@ struct e1000_adapter {
 	/* OS defined structs */
 	struct net_device *netdev;
 	struct pci_dev *pdev;
+#ifndef HAVE_NETDEV_STATS_IN_NETDEV
 	struct net_device_stats net_stats;
+#endif
 
 	/* structs defined in e1000_hw.h */
 	struct e1000_hw hw;
@@ -355,6 +359,7 @@ struct e1000_info {
 #define FLAG_HAS_CTRLEXT_ON_LOAD          (1 << 5)
 #define FLAG_HAS_SWSM_ON_LOAD             (1 << 6)
 #define FLAG_HAS_JUMBO_FRAMES             (1 << 7)
+/* reserved bit8 */
 #define FLAG_IS_ICH                       (1 << 9)
 #ifdef CONFIG_E1000E_MSIX
 #define FLAG_HAS_MSIX                     (1 << 10)
@@ -381,9 +386,10 @@ struct e1000_info {
 #define FLAG_RX_RESTART_NOW               (1 << 30)
 #define FLAG_MSI_TEST_FAILED              (1 << 31)
 
-/* CRC Stripping defines */
 #define FLAG2_CRC_STRIPPING               (1 << 0)
 #define FLAG2_HAS_PHY_WAKEUP              (1 << 1)
+#define FLAG2_IS_DISCARDING               (1 << 2)
+#define FLAG2_DISABLE_ASPM_L1             (1 << 3)
 
 #define E1000_RX_DESC_PS(R, i)	    \
 	(&(((union e1000_rx_desc_packet_split *)((R).desc))[i]))
@@ -424,7 +430,7 @@ extern int e1000e_setup_tx_resources(struct e1000_adapter *adapter);
 extern void e1000e_free_rx_resources(struct e1000_adapter *adapter);
 extern void e1000e_free_tx_resources(struct e1000_adapter *adapter);
 extern void e1000e_update_stats(struct e1000_adapter *adapter);
-extern bool e1000_has_link(struct e1000_adapter *adapter);
+extern bool e1000e_has_link(struct e1000_adapter *adapter);
 #ifdef CONFIG_E1000E_MSIX
 extern void e1000e_set_interrupt_capability(struct e1000_adapter *adapter);
 extern void e1000e_reset_interrupt_capability(struct e1000_adapter *adapter);
@@ -474,10 +480,7 @@ extern s32 e1000e_setup_fiber_serdes_link(struct e1000_hw *hw);
 extern s32 e1000e_copper_link_setup_m88(struct e1000_hw *hw);
 extern s32 e1000e_copper_link_setup_igp(struct e1000_hw *hw);
 extern s32 e1000e_setup_link(struct e1000_hw *hw);
-static inline void e1000e_clear_vfta(struct e1000_hw *hw)
-{
-	hw->mac.ops.clear_vfta(hw);
-}
+extern void e1000_clear_vfta_generic(struct e1000_hw *hw);
 extern void e1000e_init_rx_addrs(struct e1000_hw *hw, u16 rar_count);
 extern void e1000e_update_mc_addr_list_generic(struct e1000_hw *hw,
 					       u8 *mc_addr_list,
@@ -491,12 +494,7 @@ extern void e1000e_config_collision_dist(struct e1000_hw *hw);
 extern s32 e1000e_config_fc_after_link_up(struct e1000_hw *hw);
 extern s32 e1000e_force_mac_fc(struct e1000_hw *hw);
 extern s32 e1000e_blink_led(struct e1000_hw *hw);
-extern void e1000e_write_vfta_generic(struct e1000_hw *hw, u32 offset, u32 value);
-static inline void e1000e_write_vfta(struct e1000_hw *hw, u32 offset, u32 value)
-{
-	if (hw->mac.ops.write_vfta)
-		hw->mac.ops.write_vfta(hw, offset, value);
-}
+extern void e1000_write_vfta_generic(struct e1000_hw *hw, u32 offset, u32 value);
 extern void e1000e_reset_adaptive(struct e1000_hw *hw);
 extern void e1000e_update_adaptive(struct e1000_hw *hw);
 
@@ -584,7 +582,7 @@ static inline s32 e1000e_read_mac_addr(struct e1000_hw *hw)
        if (hw->mac.ops.read_mac_addr)
                return hw->mac.ops.read_mac_addr(hw);
 
-       return e1000e_read_mac_addr_generic(hw);
+       return e1000_read_mac_addr_generic(hw);
 }
 
 static inline s32 e1000_validate_nvm_checksum(struct e1000_hw *hw)
@@ -642,9 +640,6 @@ static inline void __ew32(struct e1000_hw *hw, unsigned long reg, u32 val)
 
 #define E1000_READ_REG_ARRAY(a, reg, offset) ( \
     readl((a)->hw_addr + reg + ((offset) << 2)))
-
-#define E1000_READ_REG_ARRAY_DWORD E1000_READ_REG_ARRAY
-#define E1000_WRITE_REG_ARRAY_DWORD E1000_WRITE_REG_ARRAY
 
 static inline u16 __er16flash(struct e1000_hw *hw, unsigned long reg)
 {
