@@ -35,9 +35,10 @@
 #define ICH_FLASH_FADDR                  0x0008
 #define ICH_FLASH_FDATA0                 0x0010
 
-#define ICH_FLASH_READ_COMMAND_TIMEOUT   500
-#define ICH_FLASH_WRITE_COMMAND_TIMEOUT  500
-#define ICH_FLASH_ERASE_COMMAND_TIMEOUT  3000000
+/* Requires up to 10 seconds when MNG might be accessing part. */
+#define ICH_FLASH_READ_COMMAND_TIMEOUT   10000000
+#define ICH_FLASH_WRITE_COMMAND_TIMEOUT  10000000
+#define ICH_FLASH_ERASE_COMMAND_TIMEOUT  10000000
 #define ICH_FLASH_LINEAR_ADDR_MASK       0x00FFFFFF
 #define ICH_FLASH_CYCLE_REPEAT_COUNT     10
 
@@ -113,6 +114,25 @@
 #define BM_RCTL_BAM           0x0020          /* Broadcast Accept Mode */
 #define BM_RCTL_PMCF          0x0040          /* Pass MAC Control Frames */
 #define BM_RCTL_RFCE          0x0080          /* Rx Flow Control Enable */
+
+#define HV_LED_CONFIG		PHY_REG(768, 30) /* LED Configuration */
+#define HV_MUX_DATA_CTRL               PHY_REG(776, 16)
+#define HV_MUX_DATA_CTRL_GEN_TO_MAC    0x0400
+#define HV_MUX_DATA_CTRL_FORCE_SPEED   0x0004
+#define HV_SCC_UPPER		PHY_REG(778, 16) /* Single Collision Count */
+#define HV_SCC_LOWER		PHY_REG(778, 17)
+#define HV_ECOL_UPPER		PHY_REG(778, 18) /* Excessive Collision Count */
+#define HV_ECOL_LOWER		PHY_REG(778, 19)
+#define HV_MCC_UPPER		PHY_REG(778, 20) /* Multiple Collision Count */
+#define HV_MCC_LOWER		PHY_REG(778, 21)
+#define HV_LATECOL_UPPER	PHY_REG(778, 23) /* Late Collision Count */
+#define HV_LATECOL_LOWER	PHY_REG(778, 24)
+#define HV_COLC_UPPER		PHY_REG(778, 25) /* Collision Count */
+#define HV_COLC_LOWER		PHY_REG(778, 26)
+#define HV_DC_UPPER		PHY_REG(778, 27) /* Defer Count */
+#define HV_DC_LOWER		PHY_REG(778, 28)
+#define HV_TNCRS_UPPER		PHY_REG(778, 29) /* Transmit with no CRS */
+#define HV_TNCRS_LOWER		PHY_REG(778, 30)
 
 /*
  * Additional interrupts need to be handled for ICH family:

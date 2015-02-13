@@ -847,7 +847,7 @@ static s32 e1000_reset_hw_80003es2lan(struct e1000_hw *hw)
 	ew32(IMC, 0xffffffff);
 	icr = er32(ICR);
 
-	e1000_check_alt_mac_addr_generic(hw);
+	ret_val = e1000_check_alt_mac_addr_generic(hw);
 
 out:
 	return ret_val;
@@ -1395,9 +1395,18 @@ static s32 e1000_read_mac_addr_80003es2lan(struct e1000_hw *hw)
 {
 	s32 ret_val = E1000_SUCCESS;
 
-	if (e1000_check_alt_mac_addr_generic(hw))
-		ret_val = e1000e_read_mac_addr_generic(hw);
+	/*
+	 * If there's an alternate MAC address place it in RAR0
+	 * so that it will override the Si installed default perm
+	 * address.
+	 */
+	ret_val = e1000_check_alt_mac_addr_generic(hw);
+	if (ret_val)
+		goto out;
 
+	ret_val = e1000e_read_mac_addr_generic(hw);
+
+out:
 	return ret_val;
 }
 

@@ -51,6 +51,7 @@ struct e1000_hw;
 #define E1000_DEV_ID_82573E_IAMT              0x108C
 #define E1000_DEV_ID_82573L                   0x109A
 #define E1000_DEV_ID_82574L                   0x10D3
+#define E1000_DEV_ID_82574LA                  0x10F6
 #define E1000_DEV_ID_82583V                   0x150C
 #define E1000_DEV_ID_80003ES2LAN_COPPER_DPT   0x1096
 #define E1000_DEV_ID_80003ES2LAN_SERDES_DPT   0x1098
@@ -77,6 +78,10 @@ struct e1000_hw;
 #define E1000_DEV_ID_ICH10_R_BM_V             0x10CE
 #define E1000_DEV_ID_ICH10_D_BM_LM            0x10DE
 #define E1000_DEV_ID_ICH10_D_BM_LF            0x10DF
+#define E1000_DEV_ID_PCH_M_HV_LM              0x10EA
+#define E1000_DEV_ID_PCH_M_HV_LC              0x10EB
+#define E1000_DEV_ID_PCH_D_HV_DM              0x10EF
+#define E1000_DEV_ID_PCH_D_HV_DC              0x10F0
 #define E1000_REVISION_0 0
 #define E1000_REVISION_1 1
 #define E1000_REVISION_2 2
@@ -100,6 +105,7 @@ enum e1000_mac_type {
 	e1000_ich8lan,
 	e1000_ich9lan,
 	e1000_ich10lan,
+	e1000_pchlan,
 	e1000_num_macs  /* List is 1-based, so subtract 1 for true count. */
 };
 
@@ -135,6 +141,8 @@ enum e1000_phy_type {
 	e1000_phy_igp_3,
 	e1000_phy_ife,
 	e1000_phy_bm,
+	e1000_phy_82578,
+	e1000_phy_82577,
 };
 
 enum e1000_bus_type {
@@ -479,7 +487,7 @@ struct e1000_mac_operations {
 	s32  (*get_link_up_info)(struct e1000_hw *, u16 *, u16 *);
 	s32  (*led_on)(struct e1000_hw *);
 	s32  (*led_off)(struct e1000_hw *);
-	void (*update_mc_addr_list)(struct e1000_hw *, u8 *, u32, u32, u32);
+	void (*update_mc_addr_list)(struct e1000_hw *, u8 *, u32);
 	s32  (*reset_hw)(struct e1000_hw *);
 	s32  (*init_hw)(struct e1000_hw *);
 	s32  (*setup_link)(struct e1000_hw *);
@@ -552,6 +560,10 @@ struct e1000_mac_info {
 	u16 ifs_ratio;
 	u16 ifs_step_size;
 	u16 mta_reg_count;
+
+	/* Maximum size of the MTA register table in all supported adapters */
+	#define MAX_MTA_REG 128
+	u32 mta_shadow[MAX_MTA_REG];
 	u16 rar_entry_count;
 
 	u8  forced_speed_duplex;
@@ -638,6 +650,7 @@ struct e1000_fc_info {
 
 struct e1000_dev_spec_82571 {
 	bool laa_is_present;
+	u32 smb_counter;
 };
 
 struct e1000_shadow_ram {

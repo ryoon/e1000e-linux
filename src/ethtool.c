@@ -61,6 +61,9 @@ static const struct e1000_stats e1000_gstrings_stats[] = {
 	{ "tx_multicast", E1000_STAT(stats.mptc) },
 	{ "rx_errors", E1000_STAT(net_stats.rx_errors) },
 	{ "tx_errors", E1000_STAT(net_stats.tx_errors) },
+#ifndef CONFIG_E1000E_NAPI
+	{ "rx_dropped_backlog", E1000_STAT(rx_dropped_backlog) },
+#endif
 	{ "tx_dropped", E1000_STAT(net_stats.tx_dropped) },
 	{ "multicast", E1000_STAT(stats.mprc) },
 	{ "collisions", E1000_STAT(stats.colc) },
@@ -252,8 +255,15 @@ static int e1000_set_settings(struct net_device *netdev,
 						     ADVERTISED_TP |
 						     ADVERTISED_Autoneg;
 		ecmd->advertising = hw->phy.autoneg_advertised;
-		if (adapter->fc_autoneg)
-			hw->fc.requested_mode = e1000_fc_default;
+		if (adapter->fc_autoneg) {
+			if (hw->mac.type == e1000_pchlan) {
+				/* Workaround h/w hang when Tx flow control
+				 * enabled */
+				hw->fc.requested_mode = e1000_fc_rx_pause;
+			} else {
+				hw->fc.requested_mode = e1000_fc_default;
+			}
+		}
 	} else {
 		if (e1000_set_spd_dplx(adapter, ecmd->speed + ecmd->duplex)) {
 			clear_bit(__E1000_RESETTING, &adapter->state);
@@ -306,7 +316,12 @@ static int e1000_set_pauseparam(struct net_device *netdev,
 		msleep(1);
 
 	if (adapter->fc_autoneg == AUTONEG_ENABLE) {
-		hw->fc.requested_mode = e1000_fc_default;
+		if (hw->mac.type == e1000_pchlan) {
+			/* Workaround h/w hang when Tx flow control enabled */
+			hw->fc.requested_mode = e1000_fc_rx_pause;
+		} else {
+			hw->fc.requested_mode = e1000_fc_default;
+		}
 		if (netif_running(adapter->netdev)) {
 			e1000e_down(adapter);
 			e1000e_up(adapter);
@@ -336,7 +351,7 @@ static int e1000_set_pauseparam(struct net_device *netdev,
 static u32 e1000_get_rx_csum(struct net_device *netdev)
 {
 	struct e1000_adapter *adapter = netdev_priv(netdev);
-	return (adapter->flags & FLAG_RX_CSUM_ENABLED);
+	return adapter->flags & FLAG_RX_CSUM_ENABLED;
 }
 
 static int e1000_set_rx_csum(struct net_device *netdev, u32 data)
@@ -807,6 +822,7 @@ static int e1000_reg_test(struct e1000_adapter *adapter, u64 *data)
 	u32 after;
 	u32 i;
 	u32 toggle;
+	u32 mask;
 
 	/*
 	 * The status register is Read Only, so a write should fail.
@@ -819,16 +835,8 @@ static int e1000_reg_test(struct e1000_adapter *adapter, u64 *data)
 	case e1000_80003es2lan:
 		toggle = 0x7FFFF3FF;
 		break;
-	case e1000_82573:
-	case e1000_82574:
-	case e1000_82583:
-	case e1000_ich8lan:
-	case e1000_ich9lan:
-	case e1000_ich10lan:
-		toggle = 0x7FFFF033;
-		break;
 	default:
-		toggle = 0xFFFFF833;
+		toggle = 0x7FFFF033;
 		break;
 	}
 
@@ -875,11 +883,18 @@ static int e1000_reg_test(struct e1000_adapter *adapter, u64 *data)
 		REG_PATTERN_TEST(E1000_TXCW, 0xC000FFFF, 0x0000FFFF);
 	REG_PATTERN_TEST(E1000_TDBAL(0), 0xFFFFFFF0, 0xFFFFFFFF);
 	REG_PATTERN_TEST(E1000_TIDV, 0x0000FFFF, 0x0000FFFF);
+	mask = 0x8003FFFF;
+	switch (mac->type) {
+	case e1000_ich10lan:
+	case e1000_pchlan:
+		mask |= (1 << 18);
+		break;
+	default:
+		break;
+	}
 	for (i = 0; i < mac->rar_entry_count; i++)
 		REG_PATTERN_TEST_ARRAY(E1000_RA, ((i << 1) + 1),
-				       ((mac->type == e1000_ich10lan) ?
-					   0x8007FFFF : 0x8003FFFF),
-				       0xFFFFFFFF);
+				       mask, 0xFFFFFFFF);
 
 	for (i = 0; i < mac->mta_reg_count; i++)
 		REG_PATTERN_TEST_ARRAY(E1000_MTA, i, 0xFFFFFFFF, 0xFFFFFFFF);
@@ -1828,15 +1843,22 @@ static int e1000_set_wol(struct net_device *netdev,
 /* bit defines for adapter->led_status */
 #define E1000_LED_ON		0
 
-static void e1000_led_blink_callback(unsigned long data)
+static void e1000e_led_blink_task(struct work_struct *work)
 {
-	struct e1000_adapter *adapter = (struct e1000_adapter *) data;
+	struct e1000_adapter *adapter = container_of(work,
+	                                struct e1000_adapter, led_blink_task);
 
 	if (test_and_change_bit(E1000_LED_ON, &adapter->led_status))
 		adapter->hw.mac.ops.led_off(&adapter->hw);
 	else
 		adapter->hw.mac.ops.led_on(&adapter->hw);
+}
 
+static void e1000_led_blink_callback(unsigned long data)
+{
+	struct e1000_adapter *adapter = (struct e1000_adapter *) data;
+
+	schedule_work(&adapter->led_blink_task);
 	mod_timer(&adapter->blink_timer, jiffies + E1000_ID_INTERVAL);
 }
 
@@ -1849,8 +1871,10 @@ static int e1000_phys_id(struct net_device *netdev, u32 data)
 		data = INT_MAX;
 
 	if ((hw->phy.type == e1000_phy_ife) ||
+	    (hw->mac.type == e1000_pchlan) ||
 	    (hw->mac.type == e1000_82583) ||
 	    (hw->mac.type == e1000_82574)) {
+		INIT_WORK(&adapter->led_blink_task, e1000e_led_blink_task);
 		if (!adapter->blink_timer.function) {
 			init_timer(&adapter->blink_timer);
 			adapter->blink_timer.function =
@@ -1995,6 +2019,10 @@ static const struct ethtool_ops e1000_ethtool_ops = {
 	.get_stats_count	= e1000_get_stats_count,
 	.get_coalesce		= e1000_get_coalesce,
 	.set_coalesce		= e1000_set_coalesce,
+#ifdef NETIF_F_LRO
+	.get_flags              = ethtool_op_get_flags,
+	.set_flags              = ethtool_op_set_flags,
+#endif
 };
 
 void e1000e_set_ethtool_ops(struct net_device *netdev)

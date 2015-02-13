@@ -63,9 +63,6 @@ static s32  e1000_init_hw_82571(struct e1000_hw *hw);
 static void e1000_clear_vfta_82571(struct e1000_hw *hw);
 static bool e1000_check_mng_mode_82574(struct e1000_hw *hw);
 static s32 e1000_led_on_82574(struct e1000_hw *hw);
-static void e1000_update_mc_addr_list_82571(struct e1000_hw *hw,
-                                           u8 *mc_addr_list, u32 mc_addr_count,
-                                           u32 rar_used_count, u32 rar_count);
 static s32  e1000_setup_link_82571(struct e1000_hw *hw);
 static s32  e1000_setup_copper_link_82571(struct e1000_hw *hw);
 static s32  e1000_check_for_serdes_link_82571(struct e1000_hw *hw);
@@ -260,6 +257,9 @@ static s32 e1000_init_mac_params_82571(struct e1000_hw *hw)
 {
 	struct e1000_mac_info *mac = &hw->mac;
 	s32 ret_val = E1000_SUCCESS;
+	u32 swsm = 0;
+	u32 swsm2 = 0;
+	bool force_clear_smbi = false;
 
 	/* Set media type */
 	switch (hw->device_id) {
@@ -342,7 +342,7 @@ static s32 e1000_init_mac_params_82571(struct e1000_hw *hw)
 		break;
 	}
 	/* multicast address update */
-	mac->ops.update_mc_addr_list = e1000_update_mc_addr_list_82571;
+	mac->ops.update_mc_addr_list = e1000e_update_mc_addr_list_generic;
 	/* writing VFTA */
 	mac->ops.write_vfta = e1000e_write_vfta_generic;
 	/* clearing VFTA */
@@ -377,6 +377,50 @@ static s32 e1000_init_mac_params_82571(struct e1000_hw *hw)
 	        (hw->phy.media_type == e1000_media_type_copper)
 	                ? e1000e_get_speed_and_duplex_copper
 	                : e1000e_get_speed_and_duplex_fiber_serdes;
+
+	/*
+	 * Ensure that the inter-port SWSM.SMBI lock bit is clear before
+	 * first NVM or PHY acess. This should be done for single-port
+	 * devices, and for one port only on dual-port devices so that
+	 * for those devices we can still use the SMBI lock to synchronize
+	 * inter-port accesses to the PHY & NVM.
+	 */
+	switch (hw->mac.type) {
+	case e1000_82571:
+	case e1000_82572:
+		swsm2 = er32(SWSM2);
+
+		if (!(swsm2 & E1000_SWSM2_LOCK)) {
+			/* Only do this for the first interface on this card */
+			ew32(SWSM2,
+			    swsm2 | E1000_SWSM2_LOCK);
+			force_clear_smbi = true;
+		} else
+			force_clear_smbi = false;
+		break;
+	default:
+		force_clear_smbi = true;
+		break;
+	}
+
+	if (force_clear_smbi) {
+		/* Make sure SWSM.SMBI is clear */
+		swsm = er32(SWSM);
+		if (swsm & E1000_SWSM_SMBI) {
+			/* This bit should not be set on a first interface, and
+			 * indicates that the bootagent or EFI code has
+			 * improperly left this bit enabled
+			 */
+			e_dbg("Please update your 82571 Bootagent\n");
+		}
+		ew32(SWSM, swsm & ~E1000_SWSM_SMBI);
+	}
+
+	/*
+	 * Initialze device specific counter of SMBI acquisition
+	 * timeouts.
+	 */
+	 hw->dev_spec._82571.smb_counter = 0;
 
 out:
 	return ret_val;
@@ -454,15 +498,41 @@ out:
  *
  *  Acquire the HW semaphore to access the PHY or NVM
  **/
-static s32 e1000_get_hw_semaphore_82571(struct e1000_hw *hw)
+s32 e1000_get_hw_semaphore_82571(struct e1000_hw *hw)
 {
 	u32 swsm;
 	s32 ret_val = E1000_SUCCESS;
-	s32 timeout = hw->nvm.word_size + 1;
+	s32 sw_timeout = hw->nvm.word_size + 1;
+	s32 fw_timeout = hw->nvm.word_size + 1;
 	s32 i = 0;
 
+	/*
+	 * If we have timedout 3 times on trying to acquire
+	 * the inter-port SMBI semaphore, there is old code
+	 * operating on the other port, and it is not
+	 * releasing SMBI. Modify the number of times that
+	 * we try for the semaphore to interwork with this
+	 * older code.
+	 */
+	if (hw->dev_spec._82571.smb_counter > 2)
+		sw_timeout = 1;
+
+	/* Get the SW semaphore */
+	while (i < sw_timeout) {
+		swsm = er32(SWSM);
+		if (!(swsm & E1000_SWSM_SMBI))
+			break;
+
+		udelay(50);
+		i++;
+	}
+
+	if (i == sw_timeout) {
+		e_dbg("Driver can't access device - SMBI bit is set.\n");
+		hw->dev_spec._82571.smb_counter++;
+	}
 	/* Get the FW semaphore. */
-	for (i = 0; i < timeout; i++) {
+	for (i = 0; i < fw_timeout; i++) {
 		swsm = er32(SWSM);
 		ew32(SWSM, swsm | E1000_SWSM_SWESMBI);
 
@@ -473,9 +543,9 @@ static s32 e1000_get_hw_semaphore_82571(struct e1000_hw *hw)
 		udelay(50);
 	}
 
-	if (i == timeout) {
+	if (i == fw_timeout) {
 		/* Release semaphores */
-		e1000e_put_hw_semaphore(hw);
+		e1000_put_hw_semaphore_82571(hw);
 		e_dbg("Driver can't access the NVM\n");
 		ret_val = -E1000_ERR_NVM;
 		goto out;
@@ -491,12 +561,12 @@ out:
  *
  *  Release hardware semaphore used to access the PHY or NVM
  **/
-static void e1000_put_hw_semaphore_82571(struct e1000_hw *hw)
+void e1000_put_hw_semaphore_82571(struct e1000_hw *hw)
 {
 	u32 swsm;
 
 	swsm = er32(SWSM);
-	swsm &= ~E1000_SWSM_SWESMBI;
+	swsm &= ~(E1000_SWSM_SMBI | E1000_SWSM_SWESMBI);
 	ew32(SWSM, swsm);
 }
 /**
@@ -918,8 +988,12 @@ static s32 e1000_reset_hw_82571(struct e1000_hw *hw)
 	ew32(IMC, 0xffffffff);
 	icr = er32(ICR);
 
-	if (!(e1000_check_alt_mac_addr_generic(hw)))
-		e1000e_set_laa_state_82571(hw, true);
+	/* Install any alternate MAC address into RAR0 */
+	ret_val = e1000_check_alt_mac_addr_generic(hw);
+	if (ret_val)
+		goto out;
+
+	e1000e_set_laa_state_82571(hw, true);
 
 	/* Reinitialize the 82571 serdes link state machine */
 	if (hw->phy.media_type == e1000_media_type_internal_serdes)
@@ -1225,29 +1299,6 @@ static s32 e1000_led_on_82574(struct e1000_hw *hw)
 	return E1000_SUCCESS;
 }
 
-/**
- *  e1000_update_mc_addr_list_82571 - Update Multicast addresses
- *  @hw: pointer to the HW structure
- *  @mc_addr_list: array of multicast addresses to program
- *  @mc_addr_count: number of multicast addresses to program
- *  @rar_used_count: the first RAR register free to program
- *  @rar_count: total number of supported Receive Address Registers
- *
- *  Updates the Receive Address Registers and Multicast Table Array.
- *  The caller must have a packed mc_addr_list of multicast addresses.
- *  The parameter rar_count will usually be hw->mac.rar_entry_count
- *  unless there are workarounds that change this.
- **/
-static void e1000_update_mc_addr_list_82571(struct e1000_hw *hw,
-                                           u8 *mc_addr_list, u32 mc_addr_count,
-                                           u32 rar_used_count, u32 rar_count)
-{
-	if (e1000e_get_laa_state_82571(hw))
-		rar_count--;
-
-	e1000e_update_mc_addr_list_generic(hw, mc_addr_list, mc_addr_count,
-	                                  rar_used_count, rar_count);
-}
 
 /**
  *  e1000_setup_link_82571 - Setup flow control and link settings
@@ -1289,7 +1340,7 @@ static s32 e1000_setup_link_82571(struct e1000_hw *hw)
  **/
 static s32 e1000_setup_copper_link_82571(struct e1000_hw *hw)
 {
-	u32 ctrl, led_ctrl;
+	u32 ctrl;
 	s32  ret_val;
 
 	ctrl = er32(CTRL);
@@ -1304,11 +1355,6 @@ static s32 e1000_setup_copper_link_82571(struct e1000_hw *hw)
 		break;
 	case e1000_phy_igp_2:
 		ret_val = e1000e_copper_link_setup_igp(hw);
-		/* Setup activity LED */
-		led_ctrl = er32(LEDCTL);
-		led_ctrl &= IGP_ACTIVITY_LED_MASK;
-		led_ctrl |= (IGP_ACTIVITY_LED_ENABLE | IGP_LED3_MODE);
-		ew32(LEDCTL, led_ctrl);
 		break;
 	default:
 		ret_val = -E1000_ERR_PHY;
@@ -1356,8 +1402,20 @@ static s32 e1000_setup_fiber_serdes_link_82571(struct e1000_hw *hw)
  *  e1000_check_for_serdes_link_82571 - Check for link (Serdes)
  *  @hw: pointer to the HW structure
  *
- *  Checks for link up on the hardware.  If link is not up and we have
- *  a signal, then we need to force link up.
+ *  Reports the link state as up or down.
+ *
+ *  If autonegotiation is supported by the link partner, the link state is
+ *  determined by the result of autongotiation. This is the most likely case.
+ *  If autonegotiation is not supported by the link partner, and the link
+ *  has a valid signal, force the link up.
+ *
+ *  The link state is represented internally here by 4 states:
+ *
+ *  1) down
+ *  2) autoneg_progress
+ *  3) autoneg_complete (the link sucessfully autonegotiated)
+ *  4) forced_up (the link has been forced up, it did not autonegotiate)
+ *
  **/
 s32 e1000_check_for_serdes_link_82571(struct e1000_hw *hw)
 {
@@ -1383,6 +1441,7 @@ s32 e1000_check_for_serdes_link_82571(struct e1000_hw *hw)
 				 */
 				mac->serdes_link_state =
 				    e1000_serdes_link_autoneg_progress;
+				mac->serdes_has_link = false;
 				e_dbg("AN_UP     -> AN_PROG\n");
 			}
 		break;
@@ -1401,28 +1460,35 @@ s32 e1000_check_for_serdes_link_82571(struct e1000_hw *hw)
 				    (ctrl & ~E1000_CTRL_SLU));
 				mac->serdes_link_state =
 				    e1000_serdes_link_autoneg_progress;
+				mac->serdes_has_link = false;
 				e_dbg("FORCED_UP -> AN_PROG\n");
 			}
 			break;
 
 		case e1000_serdes_link_autoneg_progress:
-			/*
-			 * If the LU bit is set in the STATUS register,
-			 * autoneg has completed sucessfully. If not,
-			 * try foring the link because the far end may be
-			 * available but not capable of autonegotiation.
-			 */
-			if (status & E1000_STATUS_LU)  {
-				mac->serdes_link_state =
-				    e1000_serdes_link_autoneg_complete;
-				e_dbg("AN_PROG   -> AN_UP\n");
+			if (rxcw & E1000_RXCW_C) {
+				/* We received /C/ ordered sets, meaning the
+				 * link partner has autonegotiated, and we can
+				 * trust the Link Up (LU) status bit
+				 */
+				if (status & E1000_STATUS_LU) {
+					mac->serdes_link_state =
+					    e1000_serdes_link_autoneg_complete;
+					e_dbg("AN_PROG   -> AN_UP\n");
+					mac->serdes_has_link = true;
+				} else {
+					/* Autoneg completed, but failed */
+					mac->serdes_link_state =
+					    e1000_serdes_link_down;
+					e_dbg("AN_PROG   -> DOWN\n");
+				}
 			} else {
-				/*
-				 * Disable autoneg, force link up and
-				 * full duplex, and change state to forced
+				/* The link partner did not autoneg.
+				 * Force link up and full duplex, and change
+				 * state to forced.
 				 */
 				ew32(TXCW,
-				    (mac->txcw & ~E1000_TXCW_ANE));
+				(mac->txcw & ~E1000_TXCW_ANE));
 				ctrl |= (E1000_CTRL_SLU | E1000_CTRL_FD);
 				ew32(CTRL, ctrl);
 
@@ -1434,10 +1500,10 @@ s32 e1000_check_for_serdes_link_82571(struct e1000_hw *hw)
 					break;
 				}
 				mac->serdes_link_state =
-				    e1000_serdes_link_forced_up;
+				e1000_serdes_link_forced_up;
+				mac->serdes_has_link = true;
 				e_dbg("AN_PROG   -> FORCED_UP\n");
 			}
-			mac->serdes_has_link = true;
 			break;
 
 		case e1000_serdes_link_down:
@@ -1617,9 +1683,18 @@ static s32 e1000_read_mac_addr_82571(struct e1000_hw *hw)
 {
 	s32 ret_val = E1000_SUCCESS;
 
-	if (e1000_check_alt_mac_addr_generic(hw))
-		ret_val = e1000e_read_mac_addr_generic(hw);
+	/*
+	 * If there's an alternate MAC address place it in RAR0
+	 * so that it will override the Si installed default perm
+	 * address.
+	 */
+	ret_val = e1000_check_alt_mac_addr_generic(hw);
+	if (ret_val)
+		goto out;
 
+	ret_val = e1000e_read_mac_addr_generic(hw);
+
+out:
 	return ret_val;
 }
 

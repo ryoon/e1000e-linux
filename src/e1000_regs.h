@@ -52,6 +52,8 @@
 #define E1000_IMC      0x000D8  /* Interrupt Mask Clear - WO */
 #define E1000_IAM      0x000E0  /* Interrupt Acknowledge Auto Mask */
 #define E1000_IVAR     0x000E4  /* Interrupt Vector Allocation Register - RW */
+#define E1000_SVCR     0x000F0
+#define E1000_SVT       0x000F4
 #define E1000_RCTL     0x00100  /* Rx Control - RW */
 #define E1000_FCTTV    0x00170  /* Flow Control Transmit Timer Value - RW */
 #define E1000_TXCW     0x00178  /* Tx Configuration Word - RW */
@@ -235,6 +237,11 @@
 #define E1000_ICTXQMTC 0x0411C  /* Interrupt Cause Tx Queue Min Thresh Count */
 #define E1000_ICRXDMTC 0x04120  /* Interrupt Cause Rx Desc Min Thresh Count */
 #define E1000_ICRXOC   0x04124  /* Interrupt Cause Receiver Overrun Count */
+/*
+ * The CRC offset register is undocumented because it is for future use and
+ * may change in the future.
+ */
+#define E1000_CRC_OFFSET 0x05F50  /* CRC Offset register */
 
 #define E1000_PCS_CFG0    0x04200  /* PCS Configuration 0 - RW */
 #define E1000_PCS_LCTL    0x04208  /* PCS Link Control - RW */
@@ -298,6 +305,7 @@
 #define E1000_FACTPS    0x05B30 /* Function Active and Power State to MNG */
 #define E1000_SWSM      0x05B50 /* SW Semaphore */
 #define E1000_FWSM      0x05B54 /* FW Semaphore */
+#define E1000_SWSM2     0x05B58 /* Driver-only SW semaphore (not used by BOOT agents) */
 #define E1000_DCA_ID    0x05B70 /* DCA Requester ID Information - RO */
 #define E1000_DCA_CTRL  0x05B74 /* DCA Control - RW */
 #define E1000_FFLT_DBG  0x05F04 /* Debug Register */
@@ -326,4 +334,5 @@
 #define E1000_RSSIR     0x05868 /* RSS Interrupt Request */
 #define E1000_RXMTRL     0x0B634 /* Time sync Rx EtherType and Msg Type - RW */
 #define E1000_RXUDP      0x0B638 /* Time Sync Rx UDP Port - RW */
+
 #endif

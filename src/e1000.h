@@ -103,6 +103,8 @@ struct e1000_info;
 /* Number of packet split data buffers (not including the header buffer) */
 #define PS_PAGE_BUFFERS			(MAX_PS_BUFFERS - 1)
 
+#define DEFAULT_JUMBO			9234
+
 enum e1000_boards {
 	board_82571,
 	board_82572,
@@ -112,6 +114,7 @@ enum e1000_boards {
 	board_ich8lan,
 	board_ich9lan,
 	board_ich10lan,
+	board_pchlan,
 	board_82583,
 };
 
@@ -281,6 +284,9 @@ struct e1000_adapter {
 
 	unsigned int rx_ps_pages;
 	u16 rx_ps_bsize0;
+#ifndef CONFIG_E1000E_NAPI
+	u64 rx_dropped_backlog;		/* count drops from rx int handler */
+#endif
 	u32 max_frame_size;
 	u32 min_frame_size;
 
@@ -315,6 +321,7 @@ struct e1000_adapter {
 	u32 eeprom_wol;
 	u32 wol;
 	u32 pba;
+	u32 max_hw_frame_size;
 
 	bool fc_autoneg;
 
@@ -324,6 +331,7 @@ struct e1000_adapter {
 	unsigned int flags2;
 	struct work_struct downshift_task;
 	struct work_struct update_phy_task;
+	struct work_struct led_blink_task;
 	u32 *config_space;
 };
 
@@ -332,6 +340,7 @@ struct e1000_info {
 	unsigned int		flags;
 	unsigned int		flags2;
 	u32			pba;
+	u32			max_hw_frame_size;
 	s32			(*get_variants)(struct e1000_adapter *);
 	void			(*init_ops)(struct e1000_hw *);
 };
@@ -373,6 +382,7 @@ struct e1000_info {
 
 /* CRC Stripping defines */
 #define FLAG2_CRC_STRIPPING               (1 << 0)
+#define FLAG2_HAS_PHY_WAKEUP              (1 << 1)
 
 #define E1000_RX_DESC_PS(R, i)	    \
 	(&(((union e1000_rx_desc_packet_split *)((R).desc))[i]))
@@ -470,9 +480,7 @@ static inline void e1000e_clear_vfta(struct e1000_hw *hw)
 extern void e1000e_init_rx_addrs(struct e1000_hw *hw, u16 rar_count);
 extern void e1000e_update_mc_addr_list_generic(struct e1000_hw *hw,
 					       u8 *mc_addr_list,
-					       u32 mc_addr_count,
-					       u32 rar_used_count,
-					       u32 rar_count);
+					       u32 mc_addr_count);
 extern void e1000e_rar_set(struct e1000_hw *hw, u8 *addr, u32 index);
 extern s32 e1000e_set_fc_watermarks(struct e1000_hw *hw);
 extern void e1000e_set_pcie_no_snoop(struct e1000_hw *hw, u32 no_snoop);
@@ -620,7 +628,7 @@ static inline void __ew32(struct e1000_hw *hw, unsigned long reg, u32 val)
 }
 
 #define er32(reg)	__er32(hw, E1000_##reg)
-#define ew32(reg,val)	__ew32(hw, E1000_##reg, (val))
+#define ew32(reg, val)	__ew32(hw, E1000_##reg, (val))
 #define e1e_flush()	er32(STATUS)
 
 #define E1000_WRITE_REG(a, reg, value) ( \
@@ -659,7 +667,7 @@ static inline void __ew32flash(struct e1000_hw *hw, unsigned long reg, u32 val)
 
 #define er16flash(reg)		__er16flash(hw, (reg))
 #define er32flash(reg)		__er32flash(hw, (reg))
-#define ew16flash(reg,val)	__ew16flash(hw, (reg), (val))
-#define ew32flash(reg,val)	__ew32flash(hw, (reg), (val))
+#define ew16flash(reg, val)	__ew16flash(hw, (reg), (val))
+#define ew32flash(reg, val)	__ew32flash(hw, (reg), (val))
 
 #endif /* _E1000_H_ */

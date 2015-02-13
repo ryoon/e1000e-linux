@@ -30,6 +30,28 @@
 #include "kcompat.h"
 
 /*****************************************************************************/
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,4,21) )
+struct sk_buff *
+_kc_skb_pad(struct sk_buff *skb, int pad)
+{
+        struct sk_buff *nskb;
+        
+        /* If the skbuff is non linear tailroom is always zero.. */
+        if(skb_tailroom(skb) >= pad)
+        {
+                memset(skb->data+skb->len, 0, pad);
+                return skb;
+        }
+        
+        nskb = skb_copy_expand(skb, skb_headroom(skb), skb_tailroom(skb) + pad, GFP_ATOMIC);
+        kfree_skb(skb);
+        if(nskb)
+                memset(nskb->data+nskb->len, 0, pad);
+        return nskb;
+} 
+#endif /* < 2.4.21 */
+
+/*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,4,13) )
 
 /**************************************/
@@ -273,7 +295,7 @@ struct sk_buff *_kc_netdev_alloc_skb(struct net_device *dev,
 /*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,19) )
 int _kc_pci_save_state(struct pci_dev *pdev)
-{ 
+{
 	struct net_device *netdev = pci_get_drvdata(pdev);
 	struct adapter_struct *adapter = netdev_priv(netdev);
 	int size = PCI_CONFIG_SPACE_LEN, i;
@@ -287,7 +309,7 @@ int _kc_pci_save_state(struct pci_dev *pdev)
 		size = PCIE_CONFIG_SPACE_LEN;
 	}
 	pci_config_space_ich8lan();
-#ifdef HAVE_PCI_ERS 
+#ifdef HAVE_PCI_ERS
 	if (adapter->config_space == NULL)
 #else
 	WARN_ON(adapter->config_space != NULL);
@@ -312,12 +334,12 @@ void _kc_pci_restore_state(struct pci_dev * pdev)
 
 	if (adapter->config_space != NULL) {
 		pcie_cap_offset = pci_find_capability(pdev, PCI_CAP_ID_EXP);
-		if (pcie_cap_offset && 
+		if (pcie_cap_offset &&
 		    !pci_read_config_word(pdev,
 		                          pcie_cap_offset + PCIE_LINK_STATUS,
 		                          &pcie_link_status))
 			size = PCIE_CONFIG_SPACE_LEN;
-	
+
 		pci_config_space_ich8lan();
 		for (i = 0; i < (size / 4); i++)
 		pci_write_config_dword(pdev, i * 4, adapter->config_space[i]);
@@ -413,5 +435,46 @@ void _kc_netif_tx_start_all_queues(struct net_device *netdev)
 #endif /* < 2.6.27 */
 
 /*****************************************************************************/
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,28) )
+
+int
+_kc_pci_prepare_to_sleep(struct pci_dev *dev)
+{
+	pci_power_t target_state;
+	int error;
+
+	target_state = pci_choose_state(dev, PMSG_SUSPEND);
+
+	pci_enable_wake(dev, target_state, true);
+
+	error = pci_set_power_state(dev, target_state);
+
+	if (error)
+		pci_enable_wake(dev, target_state, false);
+
+	return error;
+}
+
+int
+_kc_pci_wake_from_d3(struct pci_dev *dev, bool enable)
+{
+	int err;
+
+	err = pci_enable_wake(dev, PCI_D3cold, enable);
+	if (err)
+		goto out;
+
+	err = pci_enable_wake(dev, PCI_D3hot, enable);
+
+out:
+	return err;
+}
+#endif /* < 2.6.28 */
+
+/*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,29) )
 #endif /* < 2.6.29 */
+
+/*****************************************************************************/
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,30) )
+#endif /* < 2.6.30 */
