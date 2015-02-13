@@ -603,6 +603,7 @@ static s32 e1000_check_for_copper_link_ich8lan(struct e1000_hw *hw)
 	struct e1000_mac_info *mac = &hw->mac;
 	s32 ret_val;
 	bool link;
+	u16 phy_reg;
 
 	/*
 	 * We only want to go out to the PHY registers to see if Auto-Neg
@@ -647,6 +648,21 @@ static s32 e1000_check_for_copper_link_ich8lan(struct e1000_hw *hw)
 			if (ret_val)
 				goto out;
 		}
+
+		/*
+		 * Workaround for PCHx parts in half-duplex:
+		 * Set the number of preambles removed from the packet
+		 * when it is passed from the PHY to the MAC to prevent
+		 * the MAC from misinterpreting the packet type.
+		 */
+		e1e_rphy(hw, HV_KMRN_FIFO_CTRLSTA, &phy_reg);
+		phy_reg &= ~HV_KMRN_FIFO_CTRLSTA_PREAMBLE_MASK;
+
+		if ((er32(STATUS) & E1000_STATUS_FD) !=
+		    E1000_STATUS_FD)
+			phy_reg |= (1 << HV_KMRN_FIFO_CTRLSTA_PREAMBLE_SHIFT);
+
+		e1e_wphy(hw, HV_KMRN_FIFO_CTRLSTA, phy_reg);
 		break;
 	default:
 		break;
@@ -1371,11 +1387,10 @@ static s32 e1000_hv_phy_workarounds_ich8lan(struct e1000_hw *hw)
 	ret_val = hw->phy.ops.acquire(hw);
 	if (ret_val)
 		goto out;
-	ret_val = hw->phy.ops.read_reg_locked(hw, BM_PORT_GEN_CFG_REG,
-	                                      &phy_data);
+	ret_val = hw->phy.ops.read_reg_locked(hw, BM_PORT_GEN_CFG, &phy_data);
 	if (ret_val)
 		goto release;
-	ret_val = hw->phy.ops.write_reg_locked(hw, BM_PORT_GEN_CFG_REG,
+	ret_val = hw->phy.ops.write_reg_locked(hw, BM_PORT_GEN_CFG,
 	                                       phy_data & 0x00FF);
 release:
 	hw->phy.ops.release(hw);
@@ -2137,8 +2152,7 @@ static s32 e1000_read_nvm_ich8lan(struct e1000_hw *hw, u16 offset, u16 words,
 
 	ret_val = 0;
 	for (i = 0; i < words; i++) {
-		if ((dev_spec->shadow_ram) &&
-		    (dev_spec->shadow_ram[offset+i].modified)) {
+		if (dev_spec->shadow_ram[offset+i].modified) {
 			data[i] = dev_spec->shadow_ram[offset+i].value;
 		} else {
 			ret_val = e1000_read_flash_word_ich8lan(hw,
@@ -3710,7 +3724,7 @@ void e1000_resume_workarounds_pchlan(struct e1000_hw *hw)
 
 release:
 	hw->phy.ops.release(hw);
-	
+
 	return;
 }
 

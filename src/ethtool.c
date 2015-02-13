@@ -29,6 +29,7 @@
 /* ethtool support for e1000 */
 
 #include <linux/netdevice.h>
+#include <linux/interrupt.h>
 #ifdef SIOCETHTOOL
 #include <linux/ethtool.h>
 #include <linux/pci.h>
@@ -136,6 +137,7 @@ static int e1000_get_settings(struct net_device *netdev,
 {
 	struct e1000_adapter *adapter = netdev_priv(netdev);
 	struct e1000_hw *hw = &adapter->hw;
+	u32 speed;
 
 	if (hw->phy.media_type == e1000_media_type_copper) {
 
@@ -173,23 +175,23 @@ static int e1000_get_settings(struct net_device *netdev,
 		ecmd->transceiver = XCVR_EXTERNAL;
 	}
 
-	ecmd->speed = -1;
+	speed = -1;
 	ecmd->duplex = -1;
 
 	if (netif_running(netdev)) {
 		if (netif_carrier_ok(netdev)) {
-			ecmd->speed = adapter->link_speed;
+			speed = adapter->link_speed;
 			ecmd->duplex = adapter->link_duplex - 1;
 		}
 	} else {
 		u32 status = er32(STATUS);
 		if (status & E1000_STATUS_LU) {
 			if (status & E1000_STATUS_SPEED_1000)
-				ecmd->speed = 1000;
+				speed = SPEED_1000;
 			else if (status & E1000_STATUS_SPEED_100)
-				ecmd->speed = 100;
+				speed = SPEED_100;
 			else
-				ecmd->speed = 10;
+				speed = SPEED_10;
 
 			if (status & E1000_STATUS_FD)
 				ecmd->duplex = DUPLEX_FULL;
@@ -198,6 +200,7 @@ static int e1000_get_settings(struct net_device *netdev,
 		}
 	}
 
+	ethtool_cmd_speed_set(ecmd, speed);
 	ecmd->autoneg = ((hw->phy.media_type == e1000_media_type_fiber) ||
 			 hw->mac.autoneg) ? AUTONEG_ENABLE : AUTONEG_DISABLE;
 
@@ -214,20 +217,25 @@ static int e1000_get_settings(struct net_device *netdev,
 	return 0;
 }
 
-static int e1000_set_spd_dplx(struct e1000_adapter *adapter, u16 spddplx)
+static int e1000_set_spd_dplx(struct e1000_adapter *adapter, u32 spd, u8 dplx)
 {
 	struct e1000_mac_info *mac = &adapter->hw.mac;
 
 	mac->autoneg = 0;
 
+	/* Make sure dplx is at most 1 bit and lsb of speed is not set
+	 * for the switch() below to work */
+	if ((spd & 1) || (dplx & ~1))
+		goto err_inval;
+
 	/* Fiber NICs only allow 1000 gbps Full duplex */
 	if ((adapter->hw.phy.media_type == e1000_media_type_fiber) &&
-		spddplx != (SPEED_1000 + DUPLEX_FULL)) {
-		e_err("Unsupported Speed/Duplex configuration\n");
-		return -EINVAL;
+	    spd != SPEED_1000 &&
+	    dplx != DUPLEX_FULL) {
+		goto err_inval;
 	}
 
-	switch (spddplx) {
+	switch (spd + dplx) {
 	case SPEED_10 + DUPLEX_HALF:
 		mac->forced_speed_duplex = ADVERTISE_10_HALF;
 		break;
@@ -246,10 +254,13 @@ static int e1000_set_spd_dplx(struct e1000_adapter *adapter, u16 spddplx)
 		break;
 	case SPEED_1000 + DUPLEX_HALF: /* not supported */
 	default:
-		e_err("Unsupported Speed/Duplex configuration\n");
-		return -EINVAL;
+		goto err_inval;
 	}
 	return 0;
+
+err_inval:
+	e_err("Unsupported Speed/Duplex configuration\n");
+	return -EINVAL;
 }
 
 static int e1000_set_settings(struct net_device *netdev,
@@ -291,7 +302,8 @@ static int e1000_set_settings(struct net_device *netdev,
 			}
 		}
 	} else {
-		if (e1000_set_spd_dplx(adapter, ecmd->speed + ecmd->duplex)) {
+		u32 speed = ethtool_cmd_speed(ecmd);
+		if (e1000_set_spd_dplx(adapter, speed, ecmd->duplex)) {
 			clear_bit(__E1000_RESETTING, &adapter->state);
 			return -EINVAL;
 		}
@@ -1256,7 +1268,7 @@ static int e1000_setup_desc_rings(struct e1000_adapter *adapter)
 		goto err_nomem;
 	}
 
-	rx_ring->size = rx_ring->count * sizeof(struct e1000_rx_desc);
+	rx_ring->size = rx_ring->count * sizeof(union e1000_rx_desc_extended);
 	rx_ring->desc = dma_alloc_coherent(pci_dev_to_dev(pdev), rx_ring->size,
 					   &rx_ring->dma, GFP_KERNEL);
 	if (!rx_ring->desc) {
@@ -1267,7 +1279,8 @@ static int e1000_setup_desc_rings(struct e1000_adapter *adapter)
 	rx_ring->next_to_clean = 0;
 
 	rctl = er32(RCTL);
-	ew32(RCTL, rctl & ~E1000_RCTL_EN);
+	if (!(adapter->flags2 & FLAG2_NO_DISABLE_RX))
+		ew32(RCTL, rctl & ~E1000_RCTL_EN);
 	ew32(RDBAL(0), ((u64) rx_ring->dma & 0xFFFFFFFF));
 	ew32(RDBAH(0), ((u64) rx_ring->dma >> 32));
 	ew32(RDLEN(0), rx_ring->size);
@@ -1281,7 +1294,7 @@ static int e1000_setup_desc_rings(struct e1000_adapter *adapter)
 	ew32(RCTL, rctl);
 
 	for (i = 0; i < rx_ring->count; i++) {
-		struct e1000_rx_desc *rx_desc = E1000_RX_DESC(*rx_ring, i);
+		union e1000_rx_desc_extended *rx_desc;
 		struct sk_buff *skb;
 
 		skb = alloc_skb(2048 + NET_IP_ALIGN, GFP_KERNEL);
@@ -1299,7 +1312,8 @@ static int e1000_setup_desc_rings(struct e1000_adapter *adapter)
 			ret_val = 8;
 			goto err_nomem;
 		}
-		rx_desc->buffer_addr =
+		rx_desc = E1000_RX_DESC_EXT(*rx_ring, i);
+		rx_desc->read.buffer_addr =
 			cpu_to_le64(rx_ring->buffer_info[i].dma);
 		memset(skb->data, 0x00, skb->len);
 	}

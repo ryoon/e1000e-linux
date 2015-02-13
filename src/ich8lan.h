@@ -168,6 +168,15 @@
 
 #define E1000_FCRTV_PCH     0x05F40 /* PCH Flow Control Refresh Timer Value */
 
+/*
+ * For ICH, the name used for NVM word 17h is LED1 Config.
+ * For PCH, the word was re-named to OEM Config.
+ */
+#define E1000_NVM_LED1_CONFIG             0x17   /* NVM LED1/LPLU Config Word */
+#define E1000_NVM_LED1_CONFIG_LPLU_NONDOA 0x0400 /* NVM LPLU in non-D0a Bit */
+#define E1000_NVM_OEM_CONFIG              E1000_NVM_LED1_CONFIG
+#define E1000_NVM_OEM_CONFIG_LPLU_NONDOA  E1000_NVM_LED1_CONFIG_LPLU_NONDOA
+
 #define E1000_NVM_K1_CONFIG 0x1B /* NVM K1 Config Word */
 #define E1000_NVM_K1_ENABLE 0x1  /* NVM Enable K1 bit */
 

@@ -516,7 +516,8 @@ Additional Configurations
 
        # make CFLAGS_EXTRA=-DE1000E_NO_NAPI install
 
-  See www.cyberus.ca/~hadi/usenix-paper.tgz for more information on NAPI.
+  See ftp://robur.slu.se/pub/Linux/net-development/NAPI/usenix-paper.tgz for 
+  more information on NAPI.
 
   To Enable a Separate Vector for TX
   ---------------------------------- 
