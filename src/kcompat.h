@@ -1091,6 +1091,7 @@ static inline u32 _kc_netif_msg_init(int debug_value, int default_msg_enable_bit
 /*****************************************************************************/
 /* <= 2.5.0 */
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,5,0) )
+#include <linux/rtnetlink.h>
 #undef pci_register_driver
 #define pci_register_driver pci_module_init
 
@@ -1592,6 +1593,14 @@ static inline int _kc_is_multicast_ether_addr(const u8 *addr)
 #endif /* < 2.6.12 */
 
 /*****************************************************************************/
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,13) )
+#ifndef kstrdup
+#define kstrdup _kc_kstrdup
+extern char *_kc_kstrdup(const char *s, unsigned int gfp);
+#endif
+#endif /* < 2.6.13 */
+
+/*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,14) )
 #define pm_message_t u32
 #ifndef kzalloc
@@ -1741,7 +1750,7 @@ static inline int _kc_skb_padto(struct sk_buff *skb, unsigned int len)
 		return 0;
 	return _kc_skb_pad(skb, len - size);
 }
-
+#else /* < 2.6.18 */
 #endif /* < 2.6.18 */
 
 /*****************************************************************************/
@@ -2075,6 +2084,8 @@ static inline int _kc_skb_is_gso_v6(const struct sk_buff *skb)
 #define DEFINE_PCI_DEVICE_TABLE(_table) struct pci_device_id _table[]
 #endif /* DEFINE_PCI_DEVICE_TABLE */
 
+#else /* < 2.6.25 */
+
 #endif /* < 2.6.25 */
 
 /*****************************************************************************/
@@ -2319,6 +2330,8 @@ extern u16 _kc_skb_tx_hash(struct net_device *dev, struct sk_buff *skb);
 #endif
 #endif /* CONFIG_DCB */
 #include <linux/pm_runtime.h>
+/* IOV bad DMA target work arounds require at least this kernel rev support */
+#define HAVE_PCIE_TYPE
 #endif /* < 2.6.32 */
 
 /*****************************************************************************/
@@ -2716,7 +2729,11 @@ static inline int _kc_skb_checksum_start_offset(const struct sk_buff *skb)
 #endif /* < 2.6.39 */
 
 /*****************************************************************************/
-#if ( LINUX_VERSION_CODE < KERNEL_VERSION(3,0,0) )
+/* use < 2.6.40 because of a Fedora 15 kernel update where they
+ * updated the kernel version to 2.6.40.x and they back-ported 3.0 features
+ * like set_phys_id for ethtool.
+ */ 
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,40) )
 #ifdef ETHTOOL_GRXRINGS
 #ifndef FLOW_EXT
 #define	FLOW_EXT	0x80000000
@@ -2755,9 +2772,9 @@ struct _kc_ethtool_rx_flow_spec {
 #define  PCI_LTR_SCALE_SHIFT	10
 #endif
 
-#else /* < 3.0.0 */
+#else /* < 2.6.40 */
 #define HAVE_ETHTOOL_SET_PHYS_ID
-#endif /* < 3.0.0 */
+#endif /* < 2.6.40 */
 
 /*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(3,1,0) )
