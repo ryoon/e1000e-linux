@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   Intel PRO/1000 Linux driver
-  Copyright(c) 1999 - 2010 Intel Corporation.
+  Copyright(c) 1999 - 2011 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms and conditions of the GNU General Public License,
@@ -287,15 +287,15 @@ static s32 e1000_ready_nvm_eeprom(struct e1000_hw *hw)
 	struct e1000_nvm_info *nvm = &hw->nvm;
 	u32 eecd = er32(EECD);
 	s32 ret_val = E1000_SUCCESS;
-	u16 timeout = 0;
 	u8 spi_stat_reg;
 
 	if (nvm->type == e1000_nvm_eeprom_spi) {
+		u16 timeout = NVM_MAX_RETRY_SPI;
+
 		/* Clear SK and CS */
 		eecd &= ~(E1000_EECD_CS | E1000_EECD_SK);
 		ew32(EECD, eecd);
 		udelay(1);
-		timeout = NVM_MAX_RETRY_SPI;
 
 		/*
 		 * Read "Status Register" repeatedly until the LSB is cleared.
@@ -460,7 +460,7 @@ out:
  *  Reads the product board assembly (PBA) number from the EEPROM and stores
  *  the value in pba_num.
  **/
-s32 e1000_read_pba_string_generic(struct e1000_hw *hw, u8 *pba_num, 
+s32 e1000_read_pba_string_generic(struct e1000_hw *hw, u8 *pba_num,
                                   u32 pba_num_size)
 {
 	s32 ret_val;
@@ -559,67 +559,6 @@ s32 e1000_read_pba_string_generic(struct e1000_hw *hw, u8 *pba_num,
 		pba_num[(offset * 2) + 1] = (u8)(nvm_data & 0xFF);
 	}
 	pba_num[offset * 2] = '\0';
-
-out:
-	return ret_val;
-}
-
-/**
- *  e1000_read_pba_length_generic - Read device part number length
- *  @hw: pointer to the HW structure
- *  @pba_num_size: size of part number buffer
- *
- *  Reads the product board assembly (PBA) number length from the EEPROM and
- *  stores the value in pba_num_size.
- **/
-s32 e1000_read_pba_length_generic(struct e1000_hw *hw, u32 *pba_num_size)
-{
-	s32 ret_val;
-	u16 nvm_data;
-	u16 pba_ptr;
-	u16 length;
-
-	if (pba_num_size == NULL) {
-		e_dbg("PBA buffer size was null\n");
-		ret_val = E1000_ERR_INVALID_ARGUMENT;
-		goto out;
-	}
-
-	ret_val = e1000_read_nvm(hw, NVM_PBA_OFFSET_0, 1, &nvm_data);
-	if (ret_val) {
-		e_dbg("NVM Read Error\n");
-		goto out;
-	}
-
-	ret_val = e1000_read_nvm(hw, NVM_PBA_OFFSET_1, 1, &pba_ptr);
-	if (ret_val) {
-		e_dbg("NVM Read Error\n");
-		goto out;
-	}
-
-	 /* if data is not ptr guard the PBA must be in legacy format */
-	if (nvm_data != NVM_PBA_PTR_GUARD) {
-		*pba_num_size = 11;
-		goto out;
-	}
-
-	ret_val = e1000_read_nvm(hw, pba_ptr, 1, &length);
-	if (ret_val) {
-		e_dbg("NVM Read Error\n");
-		goto out;
-	}
-
-	if (length == 0xFFFF || length == 0) {
-		e_dbg("NVM PBA number section invalid length\n");
-		ret_val = E1000_ERR_NVM_PBA_SECTION;
-		goto out;
-	}
-
-	/*
-	 * Convert from length in u16 values to u8 chars, add 1 for NULL,
-	 * and subtract 2 because length field is included in length.
-	 */
-	*pba_num_size = ((u32)length * 2) - 1;
 
 out:
 	return ret_val;
