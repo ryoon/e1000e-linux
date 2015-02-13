@@ -438,8 +438,8 @@ Additional Configurations
   - The maximum MTU setting for Jumbo Frames is 9216.  This value coincides
     with the maximum Jumbo Frames size of 9234 bytes. 
 
-  - Using Jumbo Frames at 10 or 100 Mbps may result in poor performance or
-    loss of link.
+  - Using Jumbo frames at 10 or 100 Mbps is not supported and may result in 
+    poor performance or loss of link.
     
   - The following adapters limit Jumbo Frames sized packets to a maximum of
     4088 bytes:

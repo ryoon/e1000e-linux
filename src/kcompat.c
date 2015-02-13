@@ -985,6 +985,23 @@ out:
 
 /*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,36) )
+static const u32 _kc_flags_dup_features =
+	(ETH_FLAG_LRO | ETH_FLAG_NTUPLE | ETH_FLAG_RXHASH);
+
+u32 _kc_ethtool_op_get_flags(struct net_device *dev)
+{
+	return dev->features & _kc_flags_dup_features;
+}
+
+int _kc_ethtool_op_set_flags(struct net_device *dev, u32 data, u32 supported)
+{
+	if (data & ~supported)
+		return -EINVAL;
+
+	dev->features = ((dev->features & ~_kc_flags_dup_features) |
+			 (data & _kc_flags_dup_features));
+	return 0;
+}
 #endif /* < 2.6.36 */
 
 /******************************************************************************/

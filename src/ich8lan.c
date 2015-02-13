@@ -571,6 +571,7 @@ static s32 e1000_init_mac_params_ich8lan(struct e1000_hw *hw)
  **/
 static s32 e1000_set_eee_pchlan(struct e1000_hw *hw)
 {
+	struct e1000_dev_spec_ich8lan *dev_spec = &hw->dev_spec.ich8lan;
 	s32 ret_val = 0;
 	u16 phy_reg;
 
@@ -581,7 +582,7 @@ static s32 e1000_set_eee_pchlan(struct e1000_hw *hw)
 	if (ret_val)
 		goto out;
 
-	if (hw->dev_spec.ich8lan.eee_disable)
+	if (dev_spec->eee_disable)
 		phy_reg &= ~I82579_LPI_CTRL_ENABLE_MASK;
 	else
 		phy_reg |= I82579_LPI_CTRL_ENABLE_MASK;
@@ -1283,16 +1284,20 @@ s32 e1000_oem_bits_config_ich8lan(struct e1000_hw *hw, bool d0_state)
 
 		if (mac_reg & E1000_PHY_CTRL_D0A_LPLU)
 			oem_reg |= HV_OEM_BITS_LPLU;
+
+		/* Set Restart auto-neg to activate the bits */
+		if (!e1000_check_reset_block(hw))
+			oem_reg |= HV_OEM_BITS_RESTART_AN;
 	} else {
-		if (mac_reg & E1000_PHY_CTRL_NOND0A_GBE_DISABLE)
+		if (mac_reg & (E1000_PHY_CTRL_GBE_DISABLE |
+			       E1000_PHY_CTRL_NOND0A_GBE_DISABLE))
 			oem_reg |= HV_OEM_BITS_GBE_DIS;
 
-		if (mac_reg & E1000_PHY_CTRL_NOND0A_LPLU)
+		if (mac_reg & (E1000_PHY_CTRL_D0A_LPLU |
+			       E1000_PHY_CTRL_NOND0A_LPLU))
 			oem_reg |= HV_OEM_BITS_LPLU;
 	}
-	/* Restart auto-neg to activate the bits */
-	if (!e1000_check_reset_block(hw))
-		oem_reg |= HV_OEM_BITS_RESTART_AN;
+
 	ret_val = hw->phy.ops.write_reg_locked(hw, HV_OEM_BITS, oem_reg);
 
 out:
@@ -1453,8 +1458,7 @@ s32 e1000_lv_jumbo_workaround_ich8lan(struct e1000_hw *hw, bool enable)
 	u32 mac_reg;
 	u16 i;
 
-	if ((hw->mac.type != e1000_pch2lan) &&
-	    (hw->phy.type != e1000_phy_82579))
+	if (hw->mac.type != e1000_pch2lan)
 		goto out;
 
 	/* disable Rx path while enabling/disabling workaround */
@@ -1541,7 +1545,7 @@ s32 e1000_lv_jumbo_workaround_ich8lan(struct e1000_hw *hw, bool enable)
 		ret_val = e1e_wphy(hw, PHY_REG(776, 20), data);
 		if (ret_val)
 			goto out;
-		ret_val = e1e_wphy(hw, PHY_REG(776, 23), 0xFE00);
+		ret_val = e1e_wphy(hw, PHY_REG(776, 23), 0xF100);
 		if (ret_val)
 			goto out;
 		e1e_rphy(hw, HV_PM_CTRL, &data);
@@ -1660,7 +1664,7 @@ static s32 e1000_k1_workaround_lv(struct e1000_hw *hw)
 
 		ret_val = e1e_rphy(hw, I82579_LPI_CTRL, &phy_reg);
 		if (ret_val)
-			goto out;                
+			goto out;
 
 		if (status_reg & HV_M_STATUS_SPEED_1000) {
 			mac_reg |= E1000_FEXTNVM4_BEACON_DURATION_8USEC;
@@ -3677,6 +3681,7 @@ void e1000_suspend_workarounds_ich8lan(struct e1000_hw *hw)
 
 	if (hw->mac.type >= e1000_pchlan) {
 		e1000_oem_bits_config_ich8lan(hw, false);
+		e1000_phy_hw_reset_ich8lan(hw);
 		ret_val = hw->phy.ops.acquire(hw);
 		if (ret_val)
 			return;

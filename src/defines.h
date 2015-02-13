@@ -794,6 +794,10 @@
 #define E1000_ICR_TXQ1          0x00800000 /* Tx Queue 1 Interrupt */
 #define E1000_ICR_OTHER         0x01000000 /* Other Interrupts */
 
+
+#define E1000_ITR_MASK          0x000FFFFF /* ITR value bitfield */
+#define E1000_ITR_MULT          256        /* ITR mulitplier in nsec */
+
 /* PBA ECC Register */
 #define E1000_PBA_ECC_COUNTER_MASK  0xFFF00000 /* ECC counter mask */
 #define E1000_PBA_ECC_COUNTER_SHIFT 20         /* ECC counter shift value */

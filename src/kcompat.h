@@ -199,6 +199,10 @@ struct msix_entry {
 #define NETIF_F_LRO (1 << 15)
 #endif
 
+#ifndef NETIF_F_NTUPLE
+#define NETIF_F_NTUPLE (1 << 27)
+#endif
+
 #ifndef IPPROTO_SCTP
 #define IPPROTO_SCTP 132
 #endif
@@ -354,6 +358,7 @@ struct _kc_vlan_hdr {
 #ifndef VLAN_PRIO_SHIFT
 #define VLAN_PRIO_SHIFT 13
 #endif
+
 
 /*****************************************************************************/
 /* Installations with ethtool version without eeprom, adapter id, or statistics
@@ -686,6 +691,7 @@ struct _kc_ethtool_pauseparam {
 #endif
 
 #ifndef RHEL_RELEASE_CODE
+/* NOTE: RHEL_RELEASE_* introduced in RHEL4.5 */
 #define RHEL_RELEASE_CODE 0
 #endif
 #ifndef RHEL_RELEASE_VERSION
@@ -1575,7 +1581,14 @@ static inline int _kc_is_zero_ether_addr(const u8 *addr)
 {
 	return !(addr[0] | addr[1] | addr[2] | addr[3] | addr[4] | addr[5]);
 }
-#endif
+#endif /* is_zero_ether_addr */
+#ifndef is_multicast_ether_addr
+#define is_multicast_ether_addr _kc_is_multicast_ether_addr
+static inline int _kc_is_multicast_ether_addr(const u8 *addr)
+{
+	return addr[0] & 0x01;
+}
+#endif /* is_multicast_ether_addr */
 #endif /* < 2.6.12 */
 
 /*****************************************************************************/
@@ -1593,6 +1606,16 @@ extern void *_kc_kzalloc(size_t size, int flags);
 /* Extended status register. */
 #define ESTATUS_1000_TFULL	0x2000	/* Can do 1000BT Full */
 #define ESTATUS_1000_THALF	0x1000	/* Can do 1000BT Half */
+
+#if (!(RHEL_RELEASE_CODE && \
+       (RHEL_RELEASE_CODE > RHEL_RELEASE_VERSION(4,3)) && \
+       (RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(5,0))))
+#if ((LINUX_VERSION_CODE == KERNEL_VERSION(2,6,9)) && !defined(gfp_t))
+#define gfp_t unsigned
+#else
+typedef unsigned gfp_t;
+#endif
+#endif /* !RHEL4.3->RHEL5.0 */
 #endif /* < 2.6.14 */
 
 /*****************************************************************************/
@@ -1938,7 +1961,7 @@ extern void _kc_print_hex_dump(const char *level, const char *prefix_str,
 /*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,24) )
 #ifndef ETH_FLAG_LRO
-#define ETH_FLAG_LRO (1 << 15)
+#define ETH_FLAG_LRO NETIF_F_LRO
 #endif
 
 /* if GRO is supported then the napi struct must already exist */
@@ -2171,6 +2194,14 @@ extern void _kc_netif_tx_start_all_queues(struct net_device *);
 extern int _kc_pci_wake_from_d3(struct pci_dev *dev, bool enable);
 extern int _kc_pci_prepare_to_sleep(struct pci_dev *dev);
 #define netdev_alloc_page(a) alloc_page(GFP_ATOMIC)
+#ifndef __skb_queue_head_init
+static inline void __kc_skb_queue_head_init(struct sk_buff_head *list)
+{
+	list->prev = list->next = (struct sk_buff *)list;
+	list->qlen = 0;
+}
+#define __skb_queue_head_init(_q) __kc_skb_queue_head_init(_q)
+#endif
 #endif /* < 2.6.28 */
 
 /*****************************************************************************/
@@ -2322,7 +2353,7 @@ extern u16 _kc_skb_tx_hash(struct net_device *dev, struct sk_buff *skb);
 /*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,34) )
 #ifndef ETH_FLAG_NTUPLE
-#define ETH_FLAG_NTUPLE (1 << 27)
+#define ETH_FLAG_NTUPLE NETIF_F_NTUPLE
 #endif
 
 #ifndef netdev_mc_count
@@ -2460,6 +2491,14 @@ do {								\
 #ifdef SET_SYSTEM_SLEEP_PM_OPS
 #define HAVE_SYSTEM_SLEEP_PM_OPS
 #endif
+
+#ifndef for_each_set_bit
+#define for_each_set_bit(bit, addr, size) \
+	for ((bit) = find_first_bit((addr), (size)); \
+		(bit) < (size); \
+		(bit) = find_next_bit((addr), (size), (bit) + 1))
+#endif /* for_each_set_bit */
+
 #else /* < 2.6.34 */
 #define HAVE_SYSTEM_SLEEP_PM_OPS
 #ifndef HAVE_SET_RX_MODE
@@ -2496,6 +2535,8 @@ void _kc_netif_set_real_num_tx_queues(struct net_device *, unsigned int);
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,36) )
 extern int _kc_ethtool_op_set_flags(struct net_device *, u32, u32);
 #define ethtool_op_set_flags _kc_ethtool_op_set_flags
+extern u32 _kc_ethtool_op_get_flags(struct net_device *);
+#define ethtool_op_get_flags _kc_ethtool_op_get_flags
 
 #ifdef CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS
 #ifdef NET_IP_ALIGN
@@ -2608,6 +2649,11 @@ static inline __be16 __kc_vlan_get_protocol(const struct sk_buff *skb)
 #define SKBTX_IN_PROGRESS (1 << 2)
 #define SKB_SHARED_TX_IS_UNION
 #endif
+#if ( LINUX_VERSION_CODE > KERNEL_VERSION(2,4,18) )
+#ifndef HAVE_VLAN_RX_REGISTER
+#define HAVE_VLAN_RX_REGISTER
+#endif
+#endif /* > 2.4.18 */
 #endif /* < 2.6.37 */
 
 /*****************************************************************************/
@@ -2646,6 +2692,12 @@ static inline int _kc_skb_checksum_start_offset(const struct sk_buff *skb)
 
 /*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,39) )
+#ifndef skb_queue_reverse_walk_safe
+#define skb_queue_reverse_walk_safe(queue, skb, tmp)				\
+		for (skb = (queue)->prev, tmp = skb->prev;			\
+		     skb != (struct sk_buff *)(queue);				\
+		     skb = tmp, tmp = skb->prev)
+#endif
 #else /* < 2.6.39 */
 #if defined(CONFIG_FCOE) || defined(CONFIG_FCOE_MODULE)
 #ifndef HAVE_NETDEV_OPS_FCOE_DDP_TARGET
@@ -2657,6 +2709,9 @@ static inline int _kc_skb_checksum_start_offset(const struct sk_buff *skb)
 #endif
 #ifndef HAVE_SETUP_TC
 #define HAVE_SETUP_TC
+#endif
+#ifndef HAVE_NDO_SET_FEATURES
+#define HAVE_NDO_SET_FEATURES
 #endif
 #endif /* < 2.6.39 */
 
@@ -2690,12 +2745,25 @@ struct _kc_ethtool_rx_flow_spec {
 
 #define pci_disable_link_state_locked pci_disable_link_state
 
+#ifndef PCI_LTR_VALUE_MASK
+#define  PCI_LTR_VALUE_MASK	0x000003ff
+#endif
+#ifndef PCI_LTR_SCALE_MASK
+#define  PCI_LTR_SCALE_MASK	0x00001c00
+#endif
+#ifndef PCI_LTR_SCALE_SHIFT
+#define  PCI_LTR_SCALE_SHIFT	10
+#endif
+
 #else /* < 3.0.0 */
 #define HAVE_ETHTOOL_SET_PHYS_ID
 #endif /* < 3.0.0 */
 
 /*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(3,1,0) )
+#ifndef __netdev_alloc_skb_ip_align
+#define __netdev_alloc_skb_ip_align(d,l,_g) netdev_alloc_skb_ip_align(d,l)
+#endif /* __netdev_alloc_skb_ip_align */
 #else /* < 3.1.0 */
 #define HAVE_NET_DEVICE_OPS
 #endif /* < 3.1.0 */

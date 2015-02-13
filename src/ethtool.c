@@ -2165,6 +2165,36 @@ static void e1000_get_strings(struct net_device *netdev, u32 stringset,
 	}
 }
 
+#if defined(ETHTOOL_SFLAGS) && (defined(NETIF_F_RXHASH) || !defined(HAVE_VLAN_RX_REGISTER))
+static int e1000e_set_flags(struct net_device *netdev, u32 data)
+{
+	struct e1000_adapter *adapter = netdev_priv(netdev);
+	u32 supported = 0, changed = netdev->features ^ data;
+	int rc;
+
+#ifdef NETIF_F_RXHASH
+	supported |= ETH_FLAG_RXHASH;
+#endif
+#ifndef HAVE_VLAN_RX_REGISTER
+	supported |= ETH_FLAG_RXVLAN | ETH_FLAG_TXVLAN;
+#endif
+
+	rc = ethtool_op_set_flags(netdev, data, supported);
+
+	if (rc)
+		return rc;
+
+	if (changed & supported) {
+		if (netif_running(netdev))
+			e1000e_reinit_locked(adapter);
+		else
+			e1000e_reset(adapter);
+	}
+
+	return 0;
+}
+
+#endif /* ETHTOOL_SFLAGS */
 static const struct ethtool_ops e1000_ethtool_ops = {
 	.get_settings		= e1000_get_settings,
 	.set_settings		= e1000_set_settings,
@@ -2215,6 +2245,9 @@ static const struct ethtool_ops e1000_ethtool_ops = {
 	.set_coalesce		= e1000_set_coalesce,
 #ifdef ETHTOOL_GFLAGS
 	.get_flags		= ethtool_op_get_flags,
+#endif
+#if defined(ETHTOOL_SFLAGS) && (defined(NETIF_F_RXHASH) || !defined(HAVE_VLAN_RX_REGISTER))
+	.set_flags		= e1000e_set_flags,
 #endif
 };
 

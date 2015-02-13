@@ -31,10 +31,12 @@
 #ifndef _E1000_H_
 #define _E1000_H_
 
+#include <linux/bitops.h>
 #include <linux/types.h>
 #include <asm/io.h>
 #include <linux/netdevice.h>
 #include <linux/pci.h>
+#include <linux/if_vlan.h>
 
 #include "kcompat.h"
 #include "hw.h"
@@ -139,11 +141,6 @@ enum e1000_boards {
 	board_pch2lan,
 };
 
-struct e1000_queue_stats {
-	u64 packets;
-	u64 bytes;
-};
-
 struct e1000_ps_page {
 	struct page *page;
 	u64 dma; /* must be u64 - written to hw */
@@ -199,8 +196,6 @@ struct e1000_ring {
 
 #endif /* CONFIG_E1000E_MSIX */
 	struct sk_buff *rx_skb_top;
-
-	struct e1000_queue_stats stats;
 };
 
 #ifdef SIOCGMIIPHY
@@ -228,7 +223,11 @@ struct e1000_adapter {
 
 	const struct e1000_info *ei;
 
+#ifdef HAVE_VLAN_RX_REGISTER
 	struct vlan_group *vlgrp;
+#else
+	unsigned long active_vlans[BITS_TO_LONGS(VLAN_N_VID)];
+#endif
 	u32 bd_number;
 	u32 rx_buffer_len;
 	u16 mng_vlan_id;
@@ -292,7 +291,7 @@ struct e1000_adapter {
 						____cacheline_aligned_in_smp;
 #endif
 	void (*alloc_rx_buf) (struct e1000_adapter *adapter,
-			      int cleaned_count);
+			      int cleaned_count, gfp_t gfp);
 	struct e1000_ring *rx_ring;
 
 	u32 rx_int_delay;

@@ -218,7 +218,7 @@
 /* PHY Low Power Idle Control */
 #define I82579_LPI_CTRL                         PHY_REG(772, 20)
 #define I82579_LPI_CTRL_ENABLE_MASK             0x6000
-#define I82579_LPI_CTRL_FORCE_PLL_LOCK_COUNT    0x80  
+#define I82579_LPI_CTRL_FORCE_PLL_LOCK_COUNT    0x80
 
 /* EMI Registers */
 #define I82579_EMI_ADDR         0x10
