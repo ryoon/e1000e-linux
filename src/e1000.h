@@ -445,8 +445,6 @@ extern void e1000_init_function_pointers_82571(struct e1000_hw *hw);
 extern void e1000_init_function_pointers_80003es2lan(struct e1000_hw *hw);
 extern void e1000_init_function_pointers_ich8lan(struct e1000_hw *hw);
 
-extern s32 e1000e_read_pba_num(struct e1000_hw *hw, u32 *pba_num);
-
 static inline s32 e1000e_commit_phy(struct e1000_hw *hw)
 {
 	if (hw->phy.ops.commit)

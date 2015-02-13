@@ -687,20 +687,24 @@ static void e1000_get_drvinfo(struct net_device *netdev,
 	struct e1000_adapter *adapter = netdev_priv(netdev);
 	char firmware_version[32];
 
-	strncpy(drvinfo->driver,  e1000e_driver_name, 32);
-	strncpy(drvinfo->version, e1000e_driver_version, 32);
+	strncpy(drvinfo->driver,  e1000e_driver_name,
+		sizeof(drvinfo->driver) - 1);
+	strncpy(drvinfo->version, e1000e_driver_version,
+		sizeof(drvinfo->version) - 1);
 
 	/*
 	 * EEPROM image version # is reported as firmware version # for
 	 * PCI-E controllers
 	 */
-	sprintf(firmware_version, "%d.%d-%d",
+	snprintf(firmware_version, sizeof(firmware_version), "%d.%d-%d",
 		(adapter->eeprom_vers & 0xF000) >> 12,
 		(adapter->eeprom_vers & 0x0FF0) >> 4,
 		(adapter->eeprom_vers & 0x000F));
 
-	strncpy(drvinfo->fw_version, firmware_version, 32);
-	strncpy(drvinfo->bus_info, pci_name(adapter->pdev), 32);
+	strncpy(drvinfo->fw_version, firmware_version,
+		sizeof(drvinfo->fw_version));
+	strncpy(drvinfo->bus_info, pci_name(adapter->pdev),
+		sizeof(drvinfo->bus_info) - 1);
 	drvinfo->regdump_len = e1000_get_regs_len(netdev);
 	drvinfo->eedump_len = e1000_get_eeprom_len(netdev);
 }
@@ -1805,13 +1809,6 @@ static void e1000_diag_test(struct net_device *netdev,
 
 		e_info("offline testing starting\n");
 
-		/*
-		 * Link test performed before hardware reset so autoneg doesn't
-		 * interfere with test result
-		 */
-		if (e1000_link_test(adapter, &data[4]))
-			eth_test->flags |= ETH_TEST_FL_FAILED;
-
 		if (if_running)
 			/* indicate we're in test mode */
 			dev_close(netdev);
@@ -1835,15 +1832,19 @@ static void e1000_diag_test(struct net_device *netdev,
 		if (e1000_loopback_test(adapter, &data[3]))
 			eth_test->flags |= ETH_TEST_FL_FAILED;
 
-		/* restore speed, duplex, autoneg settings */
-		adapter->hw.phy.autoneg_advertised = autoneg_advertised;
-		adapter->hw.mac.forced_speed_duplex = forced_speed_duplex;
-		adapter->hw.mac.autoneg = autoneg;
-
 		/* force this routine to wait until autoneg complete/timeout */
 		adapter->hw.phy.autoneg_wait_to_complete = 1;
 		e1000e_reset(adapter);
 		adapter->hw.phy.autoneg_wait_to_complete = 0;
+
+		if (e1000_link_test(adapter, &data[4]))
+			eth_test->flags |= ETH_TEST_FL_FAILED;
+
+		/* restore speed, duplex, autoneg settings */
+		adapter->hw.phy.autoneg_advertised = autoneg_advertised;
+		adapter->hw.mac.forced_speed_duplex = forced_speed_duplex;
+		adapter->hw.mac.autoneg = autoneg;
+		e1000e_reset(adapter);
 
 		clear_bit(__E1000_TESTING, &adapter->state);
 		if (if_running)
@@ -2076,6 +2077,9 @@ static void e1000_get_ethtool_stats(struct net_device *netdev,
 		case E1000_STATS:
 			p = (char *) adapter +
 					e1000_gstrings_stats[i].stat_offset;
+			break;
+		default:
+			continue;
 			break;
 		}
 

@@ -638,8 +638,13 @@ static DEFINE_MUTEX(swflag_mutex);
  **/
 static s32 e1000_get_hw_semaphore_82574(struct e1000_hw *hw)
 {
+	s32 ret_val;
+
 	mutex_lock(&swflag_mutex);
-	return e1000_get_hw_semaphore_82573(hw);
+	ret_val = e1000_get_hw_semaphore_82573(hw);
+	if (ret_val)
+		mutex_unlock(&swflag_mutex);
+	return ret_val;
 }
 
 /**

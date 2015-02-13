@@ -1,7 +1,7 @@
 Linux* Base Driver for Intel(R) Network Connection
 ===============================================================
 
-June 14, 2010
+October 26, 2010
 
 Contents
 ========
@@ -688,6 +688,31 @@ Known Issues/Troubleshooting
   Page allocation failure. order:0 errors may occur under stress with kernels 
   2.6.25 and above. This is caused by the way the Linux kernel reports this 
   stressed condition.
+  
+  Network throughput degradation observed with Onboard video versus add-in 
+  Video Card on  82579LM Gigabit Network Connection when used with some older
+  kernels.
+  ------------------------------------------------------------------------
+  This issue can be worked around by specifying "pci=nommconf" in the kernel
+  boot parameter or by using another kernel boot parameter 
+  "memmap=128M$0x100000000" which marks 128 MB region at 4GB as reserved and
+  therefore OS won't use these RAM pages.
+
+  This issue is fixed in kernel version 2.6.21, where the kernel tries to 
+  dynamically find out the mmconfig size by looking at the number of buses 
+  that the mmconfig segment maps to.
+
+  This issue won't be seen on 32bit version of EL5, as in that case, the kernel 
+  sees that RAM is located around the 256MB window and avoids using the 
+  mmconfig space.
+
+  Activity LED blinks unexpectedly
+  --------------------------------
+  If a system based on the 82577, 82578, or 82579 controller is connected
+  to a hub, the Activity LED will blink for all network traffic present on
+  the hub. Connecting the system to a switch or router will filter out most
+  traffic not addressed to the local port.
+
 
 Support
 =======

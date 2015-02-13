@@ -626,41 +626,6 @@ out:
 }
 
 /**
- *  e1000e_read_pba_num - Read device part number
- *  @hw: pointer to the HW structure
- *  @pba_num: pointer to device part number
- *
- *  Reads the product board assembly (PBA) number from the EEPROM and stores
- *  the value in pba_num.
- **/
-s32 e1000e_read_pba_num(struct e1000_hw *hw, u32 *pba_num)
-{
-	s32  ret_val;
-	u16 nvm_data;
-
-	ret_val = e1000_read_nvm(hw, NVM_PBA_OFFSET_0, 1, &nvm_data);
-	if (ret_val) {
-		e_dbg("NVM Read Error\n");
-		goto out;
-	} else if (nvm_data == NVM_PBA_PTR_GUARD) {
-		e_dbg("NVM Not Supported\n");
-		ret_val = E1000_NOT_IMPLEMENTED;
-		goto out;
-	}
-	*pba_num = (u32)(nvm_data << 16);
-
-	ret_val = e1000_read_nvm(hw, NVM_PBA_OFFSET_1, 1, &nvm_data);
-	if (ret_val) {
-		e_dbg("NVM Read Error\n");
-		goto out;
-	}
-	*pba_num |= nvm_data;
-
-out:
-	return ret_val;
-}
-
-/**
  *  e1000_read_mac_addr_generic - Read device MAC address
  *  @hw: pointer to the HW structure
  *

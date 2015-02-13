@@ -59,7 +59,7 @@
 #define DRV_EXTRAVERSION 
 #endif
 
-#define DRV_VERSION "1.2.17" DRV_EXTRAVERSION
+#define DRV_VERSION "1.2.20" DRV_EXTRAVERSION
 char e1000e_driver_name[] = "e1000e";
 const char e1000e_driver_version[] = DRV_VERSION;
 
@@ -5317,7 +5317,7 @@ static void e1000_tx_queue(struct e1000_adapter *adapter,
 
 	i = tx_ring->next_to_use;
 
-	while (count--) {
+	do {
 		buffer_info = &tx_ring->buffer_info[i];
 		tx_desc = E1000_TX_DESC(*tx_ring, i);
 		tx_desc->buffer_addr = cpu_to_le64(buffer_info->dma);
@@ -5328,7 +5328,7 @@ static void e1000_tx_queue(struct e1000_adapter *adapter,
 		i++;
 		if (i == tx_ring->count)
 			i = 0;
-	}
+	} while (--count > 0);
 
 	tx_desc->lower.data |= cpu_to_le32(adapter->txd_cmd);
 
@@ -5582,7 +5582,9 @@ static void e1000_reset_task(struct work_struct *work)
 	adapter = container_of(work, struct e1000_adapter, reset_task);
 
 	e1000e_dump(adapter);
-	e_err("Reset adapter\n");
+	if (!((adapter->flags & FLAG_RX_NEEDS_RESTART) &&
+	      (adapter->flags & FLAG_RX_RESTART_NOW)))
+		e_info("Reset adapter\n");
 	e1000e_reinit_locked(adapter);
 }
 
@@ -6389,7 +6391,8 @@ static void e1000_print_device_info(struct e1000_adapter *adapter)
 {
 	struct e1000_hw *hw = &adapter->hw;
 	struct net_device *netdev = adapter->netdev;
-	u32 pba_num;
+	u32 ret_val;
+	u8 pba_str[E1000_PBANUM_LENGTH];
 
 	/* print bus type/speed/width info */
 	e_info("(PCI Express:2.5GB/s:%s) %02x:%02x:%02x:%02x:%02x:%02x\n",
@@ -6402,9 +6405,12 @@ static void e1000_print_device_info(struct e1000_adapter *adapter)
 	      netdev->dev_addr[4], netdev->dev_addr[5]);
 	e_info("Intel(R) PRO/%s Network Connection\n",
 	       (hw->phy.type == e1000_phy_ife) ? "10/100" : "1000");
-	e1000e_read_pba_num(hw, &pba_num);
-	e_info("MAC: %d, PHY: %d, PBA No: %06x-%03x\n",
-	       hw->mac.type, hw->phy.type, (pba_num >> 8), (pba_num & 0xff));
+	ret_val = e1000_read_pba_string_generic(hw, pba_str,
+						E1000_PBANUM_LENGTH);
+	if (ret_val)
+		strcpy(pba_str, "Unknown");
+	e_info("MAC: %d, PHY: %d, PBA No: %s\n",
+	       hw->mac.type, hw->phy.type, pba_str);
 }
 
 static void e1000_eeprom_checks(struct e1000_adapter *adapter)
