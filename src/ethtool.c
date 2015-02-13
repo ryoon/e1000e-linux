@@ -269,7 +269,7 @@ static int e1000_set_settings(struct net_device *netdev,
 	}
 
 	while (test_and_set_bit(__E1000_RESETTING, &adapter->state))
-		msleep(1);
+		usleep_range(1000, 2000);
 
 	if (ecmd->autoneg == AUTONEG_ENABLE) {
 		hw->mac.autoneg = 1;
@@ -339,7 +339,7 @@ static int e1000_set_pauseparam(struct net_device *netdev,
 	adapter->fc_autoneg = pause->autoneg;
 
 	while (test_and_set_bit(__E1000_RESETTING, &adapter->state))
-		msleep(1);
+		usleep_range(1000, 2000);
 
 	if (adapter->fc_autoneg == AUTONEG_ENABLE) {
 		if (hw->mac.type == e1000_pchlan) {
@@ -728,7 +728,7 @@ static int e1000_set_ringparam(struct net_device *netdev,
 		return -EINVAL;
 
 	while (test_and_set_bit(__E1000_RESETTING, &adapter->state))
-		msleep(1);
+		usleep_range(1000, 2000);
 
 	if (netif_running(adapter->netdev))
 		e1000e_down(adapter);
@@ -1026,7 +1026,7 @@ static int e1000_intr_test(struct e1000_adapter *adapter, u64 *data)
 
 	/* Disable all the interrupts */
 	ew32(IMC, 0xFFFFFFFF);
-	msleep(10);
+	usleep_range(10000, 20000);
 
 	/* Test each interrupt */
 	for (i = 0; i < 10; i++) {
@@ -1058,7 +1058,7 @@ static int e1000_intr_test(struct e1000_adapter *adapter, u64 *data)
 			adapter->test_icr = 0;
 			ew32(IMC, mask);
 			ew32(ICS, mask);
-			msleep(10);
+			usleep_range(10000, 20000);
 
 			if (adapter->test_icr & mask) {
 				*data = 3;
@@ -1076,7 +1076,7 @@ static int e1000_intr_test(struct e1000_adapter *adapter, u64 *data)
 		adapter->test_icr = 0;
 		ew32(IMS, mask);
 		ew32(ICS, mask);
-		msleep(10);
+		usleep_range(10000, 20000);
 
 		if (!(adapter->test_icr & mask)) {
 			*data = 4;
@@ -1094,7 +1094,7 @@ static int e1000_intr_test(struct e1000_adapter *adapter, u64 *data)
 			adapter->test_icr = 0;
 			ew32(IMC, ~mask & 0x00007FFF);
 			ew32(ICS, ~mask & 0x00007FFF);
-			msleep(10);
+			usleep_range(10000, 20000);
 
 			if (adapter->test_icr) {
 				*data = 5;
@@ -1105,7 +1105,7 @@ static int e1000_intr_test(struct e1000_adapter *adapter, u64 *data)
 
 	/* Disable all the interrupts */
 	ew32(IMC, 0xFFFFFFFF);
-	msleep(10);
+	usleep_range(10000, 20000);
 
 	/* Unhook test interrupt handler */
 	free_irq(irq, netdev);
@@ -1483,7 +1483,7 @@ static int e1000_set_82571_fiber_loopback(struct e1000_adapter *adapter)
 	 */
 #define E1000_SERDES_LB_ON 0x410
 	ew32(SCTL, E1000_SERDES_LB_ON);
-	msleep(10);
+	usleep_range(10000, 20000);
 
 	return 0;
 }
@@ -1578,7 +1578,7 @@ static void e1000_loopback_cleanup(struct e1000_adapter *adapter)
 		    hw->phy.media_type == e1000_media_type_internal_serdes) {
 #define E1000_SERDES_LB_OFF 0x400
 			ew32(SCTL, E1000_SERDES_LB_OFF);
-			msleep(10);
+			usleep_range(10000, 20000);
 			break;
 		}
 		/* Fall Through */
@@ -1888,8 +1888,7 @@ static void e1000_get_wol(struct net_device *netdev,
 		return;
 
 	wol->supported = WAKE_UCAST | WAKE_MCAST |
-	                 WAKE_BCAST | WAKE_MAGIC |
-	                 WAKE_PHY | WAKE_ARP;
+	    WAKE_BCAST | WAKE_MAGIC | WAKE_PHY;
 
 	/* apply any specific unsupported masks here */
 	if (adapter->flags & FLAG_NO_WAKE_UCAST) {
@@ -1910,19 +1909,16 @@ static void e1000_get_wol(struct net_device *netdev,
 		wol->wolopts |= WAKE_MAGIC;
 	if (adapter->wol & E1000_WUFC_LNKC)
 		wol->wolopts |= WAKE_PHY;
-	if (adapter->wol & E1000_WUFC_ARP)
-		wol->wolopts |= WAKE_ARP;
 }
 
-static int e1000_set_wol(struct net_device *netdev,
-			 struct ethtool_wolinfo *wol)
+static int e1000_set_wol(struct net_device *netdev, struct ethtool_wolinfo *wol)
 {
 	struct e1000_adapter *adapter = netdev_priv(netdev);
 
 	if (!(adapter->flags & FLAG_HAS_WOL) ||
 	    !device_can_wakeup(&adapter->pdev->dev) ||
 	    (wol->wolopts & ~(WAKE_UCAST | WAKE_MCAST | WAKE_BCAST |
-	                      WAKE_MAGIC | WAKE_PHY | WAKE_ARP)))
+			      WAKE_MAGIC | WAKE_PHY)))
 		return -EOPNOTSUPP;
 
 	/* these settings will always override what we currently have */
@@ -1938,14 +1934,45 @@ static int e1000_set_wol(struct net_device *netdev,
 		adapter->wol |= E1000_WUFC_MAG;
 	if (wol->wolopts & WAKE_PHY)
 		adapter->wol |= E1000_WUFC_LNKC;
-	if (wol->wolopts & WAKE_ARP)
-		adapter->wol |= E1000_WUFC_ARP;
 
 	device_set_wakeup_enable(&adapter->pdev->dev, adapter->wol);
 
 	return 0;
 }
 
+#ifdef HAVE_ETHTOOL_SET_PHYS_ID
+static int e1000_set_phys_id(struct net_device *netdev,
+			     enum ethtool_phys_id_state state)
+{
+	struct e1000_adapter *adapter = netdev_priv(netdev);
+	struct e1000_hw *hw = &adapter->hw;
+
+	switch (state) {
+	case ETHTOOL_ID_ACTIVE:
+		if (!hw->mac.ops.blink_led)
+			return 2;	/* cycle on/off twice per second */
+
+		hw->mac.ops.blink_led(hw);
+		break;
+
+	case ETHTOOL_ID_INACTIVE:
+		if (hw->phy.type == e1000_phy_ife)
+			e1e_wphy(hw, IFE_PHY_SPECIAL_CONTROL_LED, 0);
+		hw->mac.ops.led_off(hw);
+		hw->mac.ops.cleanup_led(hw);
+		break;
+
+	case ETHTOOL_ID_ON:
+		adapter->hw.mac.ops.led_on(&adapter->hw);
+		break;
+
+	case ETHTOOL_ID_OFF:
+		adapter->hw.mac.ops.led_off(&adapter->hw);
+		break;
+	}
+	return 0;
+}
+#else /* HAVE_ETHTOOL_SET_PHYS_ID */
 /* toggle LED 4 times per second = 2 "blinks" per second */
 #define E1000_ID_INTERVAL	(HZ/4)
 
@@ -1996,7 +2023,7 @@ static int e1000_phys_id(struct net_device *netdev, u32 data)
 		if (hw->phy.type == e1000_phy_ife)
 			e1e_wphy(hw, IFE_PHY_SPECIAL_CONTROL_LED, 0);
 	} else {
-		e1000e_blink_led(hw);
+		e1000e_blink_led_generic(hw);
 		msleep_interruptible(data * 1000);
 	}
 
@@ -2006,6 +2033,7 @@ static int e1000_phys_id(struct net_device *netdev, u32 data)
 
 	return 0;
 }
+#endif /* HAVE_ETHTOOL_SET_PHYS_ID */
 
 static int e1000_get_coalesce(struct net_device *netdev,
 			      struct ethtool_coalesce *ec)
@@ -2145,7 +2173,11 @@ static const struct ethtool_ops e1000_ethtool_ops = {
 #endif
 	.self_test		= e1000_diag_test,
 	.get_strings		= e1000_get_strings,
+#ifdef HAVE_ETHTOOL_SET_PHYS_ID
+	.set_phys_id		= e1000_set_phys_id,
+#else
 	.phys_id		= e1000_phys_id,
+#endif
 	.get_ethtool_stats	= e1000_get_ethtool_stats,
 #ifdef HAVE_ETHTOOL_GET_SSET_COUNT
 	.get_sset_count		= e1000e_get_sset_count,

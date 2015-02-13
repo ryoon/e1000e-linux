@@ -708,7 +708,7 @@ struct _kc_ethtool_pauseparam {
 #define AX_RELEASE_VERSION(a,b) (((a) << 8) + (b))
 #endif
 
-/* SuSE version macro is the same as Linux kernel verison */
+/* SuSE version macro is the same as Linux kernel version */
 #ifndef SLE_VERSION
 #define SLE_VERSION(a,b,c) KERNEL_VERSION(a,b,c)
 #endif
@@ -962,10 +962,11 @@ struct vlan_ethhdr {
 #endif /* 2.4.17 => 2.4.13 */
 
 /*****************************************************************************/
-#if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,4,19) )
-#ifndef ether_crc_le
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,4,19) ) || \
+    (( LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,0) ) && !defined(CONFIG_CRC32))
+#undef ether_crc_le
 #define ether_crc_le(length, data) _kc_ether_crc_le(length, data)
-static inline void _kc_ether_crc_le(int length, unsigned char *data)
+static inline unsigned _kc_ether_crc_le(int length, unsigned char *data)
 {
 	unsigned int crc = 0xffffffff;  /* Initial value. */
 	while(--length >= 0) {
@@ -981,10 +982,9 @@ static inline void _kc_ether_crc_le(int length, unsigned char *data)
 	}
 	return crc;
 }
-#endif /* ether_crc_le */
-#else /* < 2.4.19 */
+#else /* < 2.4.19 || (>=2.6.0 && !defined(CONFIG_CRC32)) */
 #include <linux/crc32.h>
-#endif /* < 2.4.19 */
+#endif /* < 2.4.19 || (>=2.6.0 && !defined(CONFIG_CRC32)) */
 
 /*****************************************************************************/
 /* 2.4.20 => 2.4.19 */
@@ -997,13 +997,6 @@ static inline void _kc_ether_crc_le(int length, unsigned char *data)
 #endif
 
 #endif /* 2.4.20 => 2.4.19 */
-
-/*****************************************************************************/
-/* < 2.4.21 */
-#if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,4,21) )
-#define skb_pad(x,y) _kc_skb_pad(x, y)
-struct sk_buff * _kc_skb_pad(struct sk_buff *skb, int pad);
-#endif  /* < 2.4.21 */
 
 /*****************************************************************************/
 /* 2.4.22 => 2.4.17 */
@@ -1699,6 +1692,23 @@ static inline int _kc_skb_is_gso(const struct sk_buff *skb)
 #define resource_size_t unsigned long
 #endif
 
+#ifdef skb_pad
+#undef skb_pad
+#endif
+#define skb_pad(x,y) _kc_skb_pad(x, y)
+int _kc_skb_pad(struct sk_buff *skb, int pad);
+#ifdef skb_padto
+#undef skb_padto
+#endif
+#define skb_padto(x,y) _kc_skb_padto(x, y)
+static inline int _kc_skb_padto(struct sk_buff *skb, unsigned int len)
+{
+	unsigned int size = skb->len;
+	if(likely(size >= len))
+		return 0;
+	return _kc_skb_pad(skb, len - size);
+}
+
 #endif /* < 2.6.18 */
 
 /*****************************************************************************/
@@ -1740,6 +1750,7 @@ static inline int _kc_request_irq(unsigned int irq, new_handler_t handler, unsig
 
 #define irq_handler_t new_handler_t
 /* pci_restore_state and pci_save_state handles MSI/PCIE from 2.6.19 */
+#if (!(RHEL_RELEASE_CODE && RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(5,4)))
 #define PCIE_CONFIG_SPACE_LEN 256
 #define PCI_CONFIG_SPACE_LEN 64
 #define PCIE_LINK_STATUS 0x12
@@ -1753,6 +1764,8 @@ extern int _kc_pci_save_state(struct pci_dev *);
 #undef pci_restore_state
 extern void _kc_pci_restore_state(struct pci_dev *);
 #define pci_restore_state(pdev) _kc_pci_restore_state(pdev)
+#endif /* !(RHEL_RELEASE_CODE >= RHEL 5.4) */
+
 #ifdef HAVE_PCI_ERS
 #undef free_netdev
 extern void _kc_free_netdev(struct net_device *);
@@ -2411,9 +2424,6 @@ do {								\
 #define netif_info(priv, type, dev, fmt, args...)		\
 	netif_level(info, priv, type, dev, fmt, ##args)
 
-#if !defined(CONFIG_PM_OPS) && defined(CONFIG_PM_SLEEP)
-#define CONFIG_PM_OPS
-#endif
 #ifdef SET_SYSTEM_SLEEP_PM_OPS
 #define HAVE_SYSTEM_SLEEP_PM_OPS
 #endif
@@ -2441,7 +2451,11 @@ void _kc_netif_set_real_num_tx_queues(struct net_device *, unsigned int);
 #else
 #define netif_set_real_num_tx_queues(_netdev, _count) do {} while(0)
 #endif /* HAVE_TX_MQ */
+#ifndef ETH_FLAG_RXHASH
+#define ETH_FLAG_RXHASH (1<<28)
+#endif /* ETH_FLAG_RXHASH */
 #else /* < 2.6.35 */
+#define HAVE_RX_PACKET_STEERING
 #define HAVE_PM_QOS_REQUEST_LIST
 #define HAVE_IRQ_AFFINITY_HINT
 #endif /* < 2.6.35 */
@@ -2495,9 +2509,13 @@ do {								\
 		netdev_##level(dev, fmt, ##args);		\
 } while (0)
 
+#undef usleep_range
+#define usleep_range(min, max)	msleep(DIV_ROUND_UP(min, 1000))	
+
 #else /* < 2.6.36 */
 #define HAVE_PM_QOS_REQUEST_ACTIVE
 #define HAVE_8021P_SUPPORT
+#define HAVE_NDO_GET_STATS64
 #endif /* < 2.6.36 */
 
 /*****************************************************************************/
@@ -2559,4 +2577,21 @@ static inline int _kc_skb_checksum_start_offset(const struct sk_buff *skb)
 #endif /* 2.6.22 -> 2.6.37 */
 
 #endif /* < 2.6.38 */
+
+/*****************************************************************************/
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,39) )
+#else /* < 2.6.39 */
+#if defined(CONFIG_FCOE) || defined(CONFIG_FCOE_MODULE)
+#ifndef HAVE_NETDEV_OPS_FCOE_DDP_TARGET
+#define HAVE_NETDEV_OPS_FCOE_DDP_TARGET
+#endif
+#endif /* CONFIG_FCOE || CONFIG_FCOE_MODULE */
+#endif /* < 2.6.39 */
+
+/*****************************************************************************/
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,40) )
+#else /* < 2.6.40 */
+#define HAVE_ETHTOOL_SET_PHYS_ID
+#endif /* < 2.6.40 */
+
 #endif /* _KCOMPAT_H_ */

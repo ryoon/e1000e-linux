@@ -59,7 +59,7 @@
 #define DRV_EXTRAVERSION 
 #endif
 
-#define DRV_VERSION "1.3.10a" DRV_EXTRAVERSION
+#define DRV_VERSION "1.3.17" DRV_EXTRAVERSION
 char e1000e_driver_name[] = "e1000e";
 const char e1000e_driver_version[] = DRV_VERSION;
 
@@ -110,9 +110,6 @@ static s32 e1000_get_variants_82571(struct e1000_adapter *adapter)
 	case e1000_82573:
 	case e1000_82574:
 	case e1000_82583:
-		/* Disable ASPM L0s due to hardware errata */
-		e1000e_disable_aspm(adapter->pdev, PCIE_LINK_STATE_L0S);
-
 		if (pdev->device == E1000_DEV_ID_82573L) {
 			adapter->flags |= FLAG_HAS_JUMBO_FRAMES;
 			adapter->max_hw_frame_size = DEFAULT_JUMBO;
@@ -171,7 +168,8 @@ static struct e1000_info e1000_82573_info = {
 				  | FLAG_HAS_SMART_POWER_DOWN
 				  | FLAG_HAS_AMT
 				  | FLAG_HAS_SWSM_ON_LOAD,
-	.flags2			= FLAG2_DISABLE_ASPM_L1,
+	.flags2			= FLAG2_DISABLE_ASPM_L1
+				  | FLAG2_DISABLE_ASPM_L0S,
 	.pba			= 20,
 	.max_hw_frame_size	= ETH_FRAME_LEN + ETH_FCS_LEN,
 	.init_ops		= e1000_init_function_pointers_82571,
@@ -191,7 +189,8 @@ static struct e1000_info e1000_82574_info = {
 				  | FLAG_HAS_SMART_POWER_DOWN
 				  | FLAG_HAS_AMT
 				  | FLAG_HAS_CTRLEXT_ON_LOAD,
-	.flags2			= FLAG2_CHECK_PHY_HANG, /* errata */
+	.flags2			= FLAG2_CHECK_PHY_HANG
+				  | FLAG2_DISABLE_ASPM_L0S,
 	.pba			= 32,
 	.max_hw_frame_size	= DEFAULT_JUMBO,
 	.init_ops		= e1000_init_function_pointers_82571,
@@ -207,6 +206,7 @@ static struct e1000_info e1000_82583_info = {
 				  | FLAG_HAS_SMART_POWER_DOWN
 				  | FLAG_HAS_AMT
 				  | FLAG_HAS_CTRLEXT_ON_LOAD,
+	.flags2			= FLAG2_DISABLE_ASPM_L0S,
 	.pba			= 32,
 	.max_hw_frame_size	= ETH_FRAME_LEN + ETH_FCS_LEN,
 	.init_ops		= e1000_init_function_pointers_82571,
@@ -246,6 +246,8 @@ static s32 e1000_get_variants_ich8lan(struct e1000_adapter *adapter)
 	     (!(er32(CTRL_EXT) & E1000_CTRL_EXT_LSECCK)))) {
 		adapter->flags &= ~FLAG_HAS_JUMBO_FRAMES;
 		adapter->max_hw_frame_size = ETH_FRAME_LEN + ETH_FCS_LEN;
+
+		hw->mac.ops.blink_led = NULL;
 	}
 
 	if ((adapter->hw.mac.type == e1000_ich8lan) &&
@@ -1691,7 +1693,7 @@ static bool e1000_clean_jumbo_rx_irq(struct e1000_adapter *adapter,
 				/* an error means any chain goes out the window
 				 * too */
 				if (rx_ring->rx_skb_top)
-					dev_kfree_skb(rx_ring->rx_skb_top);
+					dev_kfree_skb_irq(rx_ring->rx_skb_top);
 				rx_ring->rx_skb_top = NULL;
 				goto next_desc;
 		}
@@ -1764,7 +1766,7 @@ static bool e1000_clean_jumbo_rx_irq(struct e1000_adapter *adapter,
 		/* eth type trans needs skb->data to point to something */
 		if (!pskb_may_pull(skb, ETH_HLEN)) {
 			e_err("pskb_may_pull failed.\n");
-			dev_kfree_skb(skb);
+			dev_kfree_skb_irq(skb);
 			goto next_desc;
 		}
 
@@ -3464,7 +3466,7 @@ static void e1000_configure_rx(struct e1000_adapter *adapter)
 	rctl = er32(RCTL);
 	ew32(RCTL, rctl & ~E1000_RCTL_EN);
 	e1e_flush();
-	msleep(10);
+	usleep_range(10000, 20000);
 
 	if (adapter->flags2 & FLAG2_DMA_BURST) {
 		/*
@@ -3929,6 +3931,8 @@ int e1000e_up(struct e1000_adapter *adapter)
 #endif /* CONFIG_E1000E_MSIX */
 	e1000_irq_enable(adapter);
 
+	netif_start_queue(adapter->netdev);
+
 	/* fire a link change interrupt to start the watchdog */
 #ifdef CONFIG_E1000E_MSIX
 	if (adapter->msix_entries)
@@ -3980,7 +3984,7 @@ void e1000e_down(struct e1000_adapter *adapter)
 	ew32(TCTL, tctl);
 	/* flush both disables and wait for them to finish */
 	e1e_flush();
-	msleep(10);
+	usleep_range(10000, 20000);
 
 #ifdef CONFIG_E1000E_NAPI
 	napi_disable(&adapter->napi);
@@ -3990,9 +3994,12 @@ void e1000e_down(struct e1000_adapter *adapter)
 	del_timer_sync(&adapter->watchdog_timer);
 	del_timer_sync(&adapter->phy_info_timer);
 
-	/* Link status message must follow this format */
-	printk(KERN_INFO "e1000e: %s NIC Link is Down\n", netdev->name);
 	netif_carrier_off(netdev);
+
+	e1000e_flush_descriptors(adapter);
+	e1000_clean_tx_ring(adapter);
+	e1000_clean_rx_ring(adapter);
+
 	adapter->link_speed = 0;
 	adapter->link_duplex = 0;
 
@@ -4000,11 +4007,6 @@ void e1000e_down(struct e1000_adapter *adapter)
 	if (!pci_channel_offline(adapter->pdev))
 #endif
 		e1000e_reset(adapter);
-
-	e1000e_flush_descriptors(adapter);
-
-	e1000_clean_tx_ring(adapter);
-	e1000_clean_rx_ring(adapter);
 
 	/*
 	 * TODO: for power management, we could drop the link and
@@ -4016,7 +4018,7 @@ void e1000e_reinit_locked(struct e1000_adapter *adapter)
 {
 	might_sleep();
 	while (test_and_set_bit(__E1000_RESETTING, &adapter->state))
-		msleep(1);
+		usleep_range(1000, 2000);
 	e1000e_down(adapter);
 	e1000e_up(adapter);
 	clear_bit(__E1000_RESETTING, &adapter->state);
@@ -4304,6 +4306,8 @@ static int e1000_open(struct net_device *netdev)
 
 	e1000_irq_enable(adapter);
 
+	netif_start_queue(netdev);
+
 	adapter->idle_check = true;
 	pm_runtime_put(&pdev->dev);
 
@@ -4474,6 +4478,8 @@ static void e1000_update_phy_info(unsigned long data)
 /**
  * e1000e_update_phy_stats - Update the PHY statistics counters
  * @adapter: board private structure
+ *
+ * Read/clear the upper 16-bit PHY registers and read/accumulate lower
  **/
 static void e1000e_update_phy_stats(struct e1000_adapter *adapter)
 {
@@ -4485,89 +4491,61 @@ static void e1000e_update_phy_stats(struct e1000_adapter *adapter)
 	if (ret_val)
 		return;
 
-	hw->phy.addr = 1;
-
-#define HV_PHY_STATS_PAGE	778
 	/*
 	 * A page set is expensive so check if already on desired page.
 	 * If not, set to the page with the PHY status registers.
 	 */
+	hw->phy.addr = 1;
 	ret_val = e1000e_read_phy_reg_mdic(hw, IGP01E1000_PHY_PAGE_SELECT,
 					   &phy_data);
 	if (ret_val)
 		goto release;
-	if (phy_data != (HV_PHY_STATS_PAGE << IGP_PAGE_SHIFT)) {
-		ret_val = e1000e_write_phy_reg_mdic(hw,
-						    IGP01E1000_PHY_PAGE_SELECT,
-						    (HV_PHY_STATS_PAGE <<
-						     IGP_PAGE_SHIFT));
+	if (phy_data != (HV_STATS_PAGE << IGP_PAGE_SHIFT)) {
+		ret_val = hw->phy.ops.set_page(hw,
+					       HV_STATS_PAGE << IGP_PAGE_SHIFT);
 		if (ret_val)
 			goto release;
 	}
 
-	/* Read/clear the upper 16-bit registers and read/accumulate lower */
-
 	/* Single Collision Count */
-	e1000e_read_phy_reg_mdic(hw, HV_SCC_UPPER & MAX_PHY_REG_ADDRESS,
-				 &phy_data);
-	ret_val = e1000e_read_phy_reg_mdic(hw,
-					   HV_SCC_LOWER & MAX_PHY_REG_ADDRESS,
-					   &phy_data);
+	hw->phy.ops.read_reg_page(hw, HV_SCC_UPPER, &phy_data);
+	ret_val = hw->phy.ops.read_reg_page(hw, HV_SCC_LOWER, &phy_data);
 	if (!ret_val)
 		adapter->stats.scc += phy_data;
 
 	/* Excessive Collision Count */
-	e1000e_read_phy_reg_mdic(hw, HV_ECOL_UPPER & MAX_PHY_REG_ADDRESS,
-				 &phy_data);
-	ret_val = e1000e_read_phy_reg_mdic(hw,
-					   HV_ECOL_LOWER & MAX_PHY_REG_ADDRESS,
-					   &phy_data);
+	hw->phy.ops.read_reg_page(hw, HV_ECOL_UPPER, &phy_data);
+	ret_val = hw->phy.ops.read_reg_page(hw, HV_ECOL_LOWER, &phy_data);
 	if (!ret_val)
 		adapter->stats.ecol += phy_data;
 
 	/* Multiple Collision Count */
-	e1000e_read_phy_reg_mdic(hw, HV_MCC_UPPER & MAX_PHY_REG_ADDRESS,
-				 &phy_data);
-	ret_val = e1000e_read_phy_reg_mdic(hw,
-					   HV_MCC_LOWER & MAX_PHY_REG_ADDRESS,
-					   &phy_data);
+	hw->phy.ops.read_reg_page(hw, HV_MCC_UPPER, &phy_data);
+	ret_val = hw->phy.ops.read_reg_page(hw, HV_MCC_LOWER, &phy_data);
 	if (!ret_val)
 		adapter->stats.mcc += phy_data;
 
 	/* Late Collision Count */
-	e1000e_read_phy_reg_mdic(hw, HV_LATECOL_UPPER & MAX_PHY_REG_ADDRESS,
-				 &phy_data);
-	ret_val = e1000e_read_phy_reg_mdic(hw,
-					   HV_LATECOL_LOWER &
-					   MAX_PHY_REG_ADDRESS,
-					   &phy_data);
+	hw->phy.ops.read_reg_page(hw, HV_LATECOL_UPPER, &phy_data);
+	ret_val = hw->phy.ops.read_reg_page(hw, HV_LATECOL_LOWER, &phy_data);
 	if (!ret_val)
 		adapter->stats.latecol += phy_data;
 
 	/* Collision Count - also used for adaptive IFS */
-	e1000e_read_phy_reg_mdic(hw, HV_COLC_UPPER & MAX_PHY_REG_ADDRESS,
-				 &phy_data);
-	ret_val = e1000e_read_phy_reg_mdic(hw,
-					   HV_COLC_LOWER & MAX_PHY_REG_ADDRESS,
-					   &phy_data);
+	hw->phy.ops.read_reg_page(hw, HV_COLC_UPPER, &phy_data);
+	ret_val = hw->phy.ops.read_reg_page(hw, HV_COLC_LOWER, &phy_data);
 	if (!ret_val)
 		hw->mac.collision_delta = phy_data;
 
 	/* Defer Count */
-	e1000e_read_phy_reg_mdic(hw, HV_DC_UPPER & MAX_PHY_REG_ADDRESS,
-				 &phy_data);
-	ret_val = e1000e_read_phy_reg_mdic(hw,
-					   HV_DC_LOWER & MAX_PHY_REG_ADDRESS,
-					   &phy_data);
+	hw->phy.ops.read_reg_page(hw, HV_DC_UPPER, &phy_data);
+	ret_val = hw->phy.ops.read_reg_page(hw, HV_DC_LOWER, &phy_data);
 	if (!ret_val)
 		adapter->stats.dc += phy_data;
 
 	/* Transmit with no CRS */
-	e1000e_read_phy_reg_mdic(hw, HV_TNCRS_UPPER & MAX_PHY_REG_ADDRESS,
-				 &phy_data);
-	ret_val = e1000e_read_phy_reg_mdic(hw,
-					   HV_TNCRS_LOWER & MAX_PHY_REG_ADDRESS,
-					   &phy_data);
+	hw->phy.ops.read_reg_page(hw, HV_TNCRS_UPPER, &phy_data);
+	ret_val = hw->phy.ops.read_reg_page(hw, HV_TNCRS_LOWER, &phy_data);
 	if (!ret_val)
 		adapter->stats.tncrs += phy_data;
 
@@ -4998,7 +4976,6 @@ static void e1000_watchdog_task(struct work_struct *work)
 				phy->ops.cfg_on_link_up(hw);
 
 			netif_carrier_on(netdev);
-			netif_wake_queue(netdev);
 
 			if (!test_bit(__E1000_DOWN, &adapter->state))
 				mod_timer(&adapter->phy_info_timer,
@@ -5729,7 +5706,7 @@ static int e1000_change_mtu(struct net_device *netdev, int new_mtu)
 	}
 
 	while (test_and_set_bit(__E1000_RESETTING, &adapter->state))
-		msleep(1);
+		usleep_range(1000, 2000);
 	/* e1000e_down -> e1000e_reset dependent on max_frame_size & mtu */
 	adapter->max_frame_size = max_frame;
 	e_info("changing MTU from %d to %d\n", netdev->mtu, new_mtu);
@@ -5869,22 +5846,35 @@ static int e1000_ioctl(struct net_device *netdev, struct ifreq *ifr, int cmd)
 static int e1000_init_phy_wakeup(struct e1000_adapter *adapter, u32 wufc)
 {
 	struct e1000_hw *hw = &adapter->hw;
-	u32 i, mac_reg;
-	u16 phy_reg;
+	u32 mac_reg, i;
+	u16 phy_reg, wuc_enable;
 	int retval = 0;
 
 	/* copy MAC RARs to PHY RARs */
 	e1000_copy_rx_addrs_to_phy_ich8lan(hw);
 
-	/* copy MAC MTA to PHY MTA */
+	retval = hw->phy.ops.acquire(hw);
+	if (retval) {
+		e_err("Could not acquire PHY\n");
+		return retval;
+	}
+
+	/* Enable access to wakeup registers on and set page to BM_WUC_PAGE */
+	retval = e1000_enable_phy_wakeup_reg_access_bm(hw, &wuc_enable);
+	if (retval)
+		goto out;
+
+	/* copy MAC MTA to PHY MTA - only needed for pchlan */
 	for (i = 0; i < adapter->hw.mac.mta_reg_count; i++) {
 		mac_reg = E1000_READ_REG_ARRAY(hw, E1000_MTA, i);
-		e1e_wphy(hw, BM_MTA(i), (u16)(mac_reg & 0xFFFF));
-		e1e_wphy(hw, BM_MTA(i) + 1, (u16)((mac_reg >> 16) & 0xFFFF));
+		hw->phy.ops.write_reg_page(hw, BM_MTA(i),
+					   (u16)(mac_reg & 0xFFFF));
+		hw->phy.ops.write_reg_page(hw, BM_MTA(i) + 1,
+					   (u16)((mac_reg >> 16) & 0xFFFF));
 	}
 
 	/* configure PHY Rx Control register */
-	e1e_rphy(&adapter->hw, BM_RCTL, &phy_reg);
+	hw->phy.ops.read_reg_page(&adapter->hw, BM_RCTL, &phy_reg);
 	mac_reg = er32(RCTL);
 	if (mac_reg & E1000_RCTL_UPE)
 		phy_reg |= BM_RCTL_UPE;
@@ -5901,31 +5891,19 @@ static int e1000_init_phy_wakeup(struct e1000_adapter *adapter, u32 wufc)
 	mac_reg = er32(CTRL);
 	if (mac_reg & E1000_CTRL_RFCE)
 		phy_reg |= BM_RCTL_RFCE;
-	e1e_wphy(&adapter->hw, BM_RCTL, phy_reg);
+	hw->phy.ops.write_reg_page(&adapter->hw, BM_RCTL, phy_reg);
 
 	/* enable PHY wakeup in MAC register */
 	ew32(WUFC, wufc);
 	ew32(WUC, E1000_WUC_PHY_WAKE | E1000_WUC_PME_EN);
 
 	/* configure and enable PHY wakeup in PHY registers */
-	e1e_wphy(&adapter->hw, BM_WUFC, wufc);
-	e1e_wphy(&adapter->hw, BM_WUC, E1000_WUC_PME_EN);
+	hw->phy.ops.write_reg_page(&adapter->hw, BM_WUFC, wufc);
+	hw->phy.ops.write_reg_page(&adapter->hw, BM_WUC, E1000_WUC_PME_EN);
 
 	/* activate PHY wakeup */
-	retval = hw->phy.ops.acquire(hw);
-	if (retval) {
-		e_err("Could not acquire PHY\n");
-		return retval;
-	}
-	e1000e_write_phy_reg_mdic(hw, IGP01E1000_PHY_PAGE_SELECT,
-	                         (BM_WUC_ENABLE_PAGE << IGP_PAGE_SHIFT));
-	retval = e1000e_read_phy_reg_mdic(hw, BM_WUC_ENABLE_REG, &phy_reg);
-	if (retval) {
-		e_err("Could not read PHY page 769\n");
-		goto out;
-	}
-	phy_reg |= BM_WUC_ENABLE_BIT | BM_WUC_HOST_WU_BIT;
-	retval = e1000e_write_phy_reg_mdic(hw, BM_WUC_ENABLE_REG, phy_reg);
+	wuc_enable |= BM_WUC_ENABLE_BIT | BM_WUC_HOST_WU_BIT;
+	retval = e1000_disable_phy_wakeup_reg_access_bm(hw, &wuc_enable);
 	if (retval)
 		e_err("Could not set PHY Host Wakeup bit\n");
 out:
@@ -5995,7 +5973,7 @@ static int __e1000_shutdown(struct pci_dev *pdev, bool *enable_wake,
 		}
 
 		if (adapter->flags & FLAG_IS_ICH)
-			e1000e_disable_gig_wol_ich8lan(&adapter->hw);
+			e1000_suspend_workarounds_ich8lan(&adapter->hw);
 
 		/* Allow time for pending master requests to run */
 		e1000e_disable_pcie_master(&adapter->hw);
@@ -6114,7 +6092,7 @@ static void e1000e_disable_aspm(struct pci_dev *pdev, u16 state)
 	__e1000e_disable_aspm(pdev, state);
 }
 
-#ifdef CONFIG_PM_OPS
+#ifdef CONFIG_PM
 static bool e1000e_pm_ready(struct e1000_adapter *adapter)
 {
 	return !!adapter->tx_ring->buffer_info;
@@ -6125,13 +6103,19 @@ static int __e1000_resume(struct pci_dev *pdev)
 	struct net_device *netdev = pci_get_drvdata(pdev);
 	struct e1000_adapter *adapter = netdev_priv(netdev);
 	struct e1000_hw *hw = &adapter->hw;
+	u16 aspm_disable_flag = 0;
 	u32 err;
+
+	if (adapter->flags2 & FLAG2_DISABLE_ASPM_L0S)
+		aspm_disable_flag = PCIE_LINK_STATE_L0S;
+	if (adapter->flags2 & FLAG2_DISABLE_ASPM_L1)
+		aspm_disable_flag |= PCIE_LINK_STATE_L1;
+	if (aspm_disable_flag)
+		e1000e_disable_aspm(pdev, aspm_disable_flag);
 
 	pci_set_power_state(pdev, PCI_D0);
 	pci_restore_state(pdev);
 	pci_save_state(pdev);
-	if (adapter->flags2 & FLAG2_DISABLE_ASPM_L1)
-		e1000e_disable_aspm(pdev, PCIE_LINK_STATE_L1);
 
 #ifndef HAVE_SYSTEM_SLEEP_PM_OPS
 	err = pci_enable_device_mem(pdev);
@@ -6155,6 +6139,9 @@ static int __e1000_resume(struct pci_dev *pdev)
 		if (err)
 			return err;
 	}
+
+	if (hw->mac.type == e1000_pch2lan)
+		e1000_resume_workarounds_pchlan(&adapter->hw);
 
 	e1000e_power_up_phy(adapter);
 
@@ -6295,7 +6282,7 @@ static int e1000_runtime_resume(struct device *dev)
 }
 #endif /* HAVE_SYSTEM_SLEEP_PM_OPS */
 #endif /* CONFIG_PM_RUNTIME */
-#endif /* CONFIG_PM_OPS */
+#endif /* CONFIG_PM */
 
 #ifndef USE_REBOOT_NOTIFIER
 static void e1000_shutdown(struct pci_dev *pdev)
@@ -6345,9 +6332,10 @@ static irqreturn_t e1000_intr_msix(int irq, void *data)
 {
 	struct net_device *netdev = data;
 	struct e1000_adapter *adapter = netdev_priv(netdev);
-	int vector, msix_irq;
 
 	if (adapter->msix_entries) {
+		int vector, msix_irq;
+
 		vector = 0;
 		msix_irq = adapter->msix_entries[vector].vector;
 		disable_irq(msix_irq);
@@ -6381,7 +6369,6 @@ static void e1000_netpoll(struct net_device *netdev)
 {
 	struct e1000_adapter *adapter = netdev_priv(netdev);
 
-	enable_irq(adapter->pdev->irq);
 	switch (adapter->int_mode) {
 	case E1000E_INT_MODE_MSIX:
 		e1000_intr_msix(adapter->pdev->irq, netdev);
@@ -6440,11 +6427,17 @@ static pci_ers_result_t e1000_io_slot_reset(struct pci_dev *pdev)
 	struct net_device *netdev = pci_get_drvdata(pdev);
 	struct e1000_adapter *adapter = netdev_priv(netdev);
 	struct e1000_hw *hw = &adapter->hw;
+	u16 aspm_disable_flag = 0;
 	int err;
 	pci_ers_result_t result;
 
+	if (adapter->flags2 & FLAG2_DISABLE_ASPM_L0S)
+		aspm_disable_flag = PCIE_LINK_STATE_L0S;
 	if (adapter->flags2 & FLAG2_DISABLE_ASPM_L1)
-		e1000e_disable_aspm(pdev, PCIE_LINK_STATE_L1);
+		aspm_disable_flag |= PCIE_LINK_STATE_L1;
+	if (aspm_disable_flag)
+		e1000e_disable_aspm(pdev, aspm_disable_flag);
+
 	err = pci_enable_device_mem(pdev);
 	if (err) {
 		dev_err(pci_dev_to_dev(pdev),
@@ -6512,7 +6505,7 @@ static void e1000_print_device_info(struct e1000_adapter *adapter)
 	u8 pba_str[E1000_PBANUM_LENGTH];
 
 	/* print bus type/speed/width info */
-	e_info("(PCI Express:2.5GB/s:%s) %02x:%02x:%02x:%02x:%02x:%02x\n",
+	e_info("(PCI Express:2.5GT/s:%s) %02x:%02x:%02x:%02x:%02x:%02x\n",
 	       /* bus width */
 	       ((hw->bus.width == e1000_bus_width_pcie_x4) ? "Width x4" :
 	        "Width x1"),
@@ -6557,7 +6550,7 @@ s32 e1000_read_pcie_cap_reg(struct e1000_hw *hw, u32 reg, u16 *value)
 
 	pci_read_config_word(hw->adapter->pdev, cap_offset + reg, value);
 
-	return E1000_SUCCESS;
+	return 0;
 }
 
 #ifdef HAVE_NET_DEVICE_OPS
@@ -6605,12 +6598,17 @@ static int __devinit e1000_probe(struct pci_dev *pdev,
 	resource_size_t mmio_start, mmio_len;
 	resource_size_t flash_start, flash_len;
 	static int cards_found;
+	u16 aspm_disable_flag = 0;
 	int i, err, pci_using_dac;
 	u16 eeprom_data = 0;
 	u16 eeprom_apme_mask = E1000_EEPROM_APME;
 
+	if (ei->flags2 & FLAG2_DISABLE_ASPM_L0S)
+		aspm_disable_flag = PCIE_LINK_STATE_L0S;
 	if (ei->flags2 & FLAG2_DISABLE_ASPM_L1)
-		e1000e_disable_aspm(pdev, PCIE_LINK_STATE_L1);
+		aspm_disable_flag |= PCIE_LINK_STATE_L1;
+	if (aspm_disable_flag)
+		e1000e_disable_aspm(pdev, aspm_disable_flag);
 
 	err = pci_enable_device_mem(pdev);
 	if (err)
@@ -6855,7 +6853,9 @@ static int __devinit e1000_probe(struct pci_dev *pdev,
 	INIT_WORK(&adapter->downshift_task, e1000e_downshift_workaround);
 	INIT_WORK(&adapter->update_phy_task, e1000e_update_phy_task);
 	INIT_WORK(&adapter->print_hang_task, e1000_print_hw_hang);
+#ifndef HAVE_ETHTOOL_SET_PHYS_ID
 	INIT_WORK(&adapter->led_blink_task, e1000e_led_blink_task);
+#endif
 
 	/* Initialize link parameters. User can change them with ethtool */
 	adapter->hw.mac.autoneg = 1;
@@ -6996,7 +6996,9 @@ static void __devexit e1000_remove(struct pci_dev *pdev)
 	cancel_work_sync(&adapter->watchdog_task);
 	cancel_work_sync(&adapter->downshift_task);
 	cancel_work_sync(&adapter->update_phy_task);
+#ifndef HAVE_ETHTOOL_SET_PHYS_ID
 	cancel_work_sync(&adapter->led_blink_task);
+#endif
 	cancel_work_sync(&adapter->print_hang_task);
 
 	if (!(netdev->flags & IFF_UP))
@@ -7117,7 +7119,7 @@ static DEFINE_PCI_DEVICE_TABLE(e1000e_pci_tbl) = {
 };
 MODULE_DEVICE_TABLE(pci, e1000e_pci_tbl);
 
-#ifdef CONFIG_PM_OPS
+#ifdef CONFIG_PM
 #ifdef HAVE_SYSTEM_SLEEP_PM_OPS
 static const struct dev_pm_ops e1000_pm_ops = {
 	SET_SYSTEM_SLEEP_PM_OPS(e1000_suspend, e1000_resume)
@@ -7133,10 +7135,10 @@ static struct pci_driver e1000_driver = {
 	.id_table = e1000e_pci_tbl,
 	.probe    = e1000_probe,
 	.remove   = __devexit_p(e1000_remove),
-#ifdef CONFIG_PM_OPS
+#ifdef CONFIG_PM
 #ifdef HAVE_SYSTEM_SLEEP_PM_OPS
 	.driver.pm = &e1000_pm_ops,
-#else
+#elif defined(CONFIG_PM_SLEEP)
 	.suspend  = e1000_suspend,
 	.resume   = e1000_resume,
 #endif /* HAVE_SYSTEM_SLEEP_PM_OPS */
