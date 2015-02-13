@@ -90,9 +90,6 @@ struct e1000_info;
 
 #define E1000_MNG_VLAN_NONE		(-1)
 
-/* Number of packet split data buffers (not including the header buffer) */
-#define PS_PAGE_BUFFERS			(MAX_PS_BUFFERS - 1)
-
 #define DEFAULT_JUMBO			9234
 
 /* Time to wait before putting the device into D3 if there's no link (in ms). */
@@ -142,6 +139,7 @@ enum e1000_boards {
 	board_pchlan,
 	board_pch2lan,
 	board_pch_lpt,
+	board_pch_spt
 };
 
 struct e1000_ps_page {
@@ -280,15 +278,16 @@ struct e1000_adapter {
 	u32 tx_head_addr;
 	u32 tx_fifo_size;
 	u32 tx_dma_failed;
+	u32 tx_hwtstamp_timeouts;
 
 	/* Rx */
 #ifdef CONFIG_E1000E_NAPI
-	bool (*clean_rx) (struct e1000_ring *ring, int *work_done,
+	bool (*clean_rx)(struct e1000_ring *ring, int *work_done,
 			  int work_to_do) ____cacheline_aligned_in_smp;
 #else
-	bool (*clean_rx) (struct e1000_ring *ring) ____cacheline_aligned_in_smp;
+	bool (*clean_rx)(struct e1000_ring *ring) ____cacheline_aligned_in_smp;
 #endif
-	void (*alloc_rx_buf) (struct e1000_ring *ring, int cleaned_count,
+	void (*alloc_rx_buf)(struct e1000_ring *ring, int cleaned_count,
 			      gfp_t gfp);
 	struct e1000_ring *rx_ring;
 
@@ -385,6 +384,7 @@ struct e1000_adapter {
 	struct hwtstamp_config hwtstamp_config;
 	struct delayed_work systim_overflow_work;
 	struct sk_buff *tx_hwtstamp_skb;
+	unsigned long tx_hwtstamp_start;
 	struct work_struct tx_hwtstamp_work;
 	spinlock_t systim_lock;	/* protects SYSTIML/H regsters */
 	struct cyclecounter cc;

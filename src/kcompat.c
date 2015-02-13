@@ -1149,7 +1149,7 @@ int _kc_pci_num_vf(struct pci_dev *dev)
 
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,35) )
 #if defined(DRIVER_IXGBE) || defined(DRIVER_IGB) || defined(DRIVER_I40E) || \
-	defined(DRIVER_IXGBEVF)
+	defined(DRIVER_IXGBEVF) || defined(DRIVER_FM10K)
 #ifdef HAVE_TX_MQ
 #if (!(RHEL_RELEASE_CODE && RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(6,0)))
 #ifndef CONFIG_NETDEVICES_MULTIQUEUE
@@ -1279,7 +1279,7 @@ static inline bool __kc_pcie_cap_has_sltctl(struct pci_dev *dev)
 
 	pos = pci_find_capability(dev, PCI_CAP_ID_EXP);
 	if (!pos)
-		return 0;
+		return false;
 	pci_read_config_word(dev, pos + PCI_EXP_FLAGS, &pcie_flags_reg);
 
 	return __kc_pcie_cap_version(dev) > 1 ||
@@ -1419,9 +1419,11 @@ int __kc_dma_set_mask_and_coherent(struct device *dev, u64 mask)
 
 	if (!err)
 		/* coherent mask for the same size will always succeed if
-		 * dma_set_mask does
+		 * dma_set_mask does. However we store the error anyways, due
+		 * to some kernels which use gcc's warn_unused_result on their
+		 * definition of dma_set_coherent_mask.
 		 */
-		dma_set_coherent_mask(dev, mask);
+		err = dma_set_coherent_mask(dev, mask);
 	return err;
 }
 #endif /* 3.13.0 */
