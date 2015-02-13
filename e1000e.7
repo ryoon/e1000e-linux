@@ -8,23 +8,17 @@
 
 .SH NAME
 e1000e \-This file describes the Linux* Base Driver for the Gigabit Family of Adapters.
-
 .SH SYNOPSIS
 .PD 0.4v
 modprobe e1000e [<option>=<VAL1>,<VAL2>,...]
 .PD 1v
-
 .SH DESCRIPTION
 This driver is intended for \fB2.4.x\fR and \fB2.6.x\fR kernels.  This driver includes support for Intel(R) Itanium(R)2-based systems.
 .LP
-
-This driver is only supported as a loadable module at this time.  Intel is not supplying patches against the kernel source to allow for static linking of the driver.  For questions related to hardware requirements, refer to the documentation supplied with your Intel adapter.  All hardware requirements listed apply to use with Linux.
-
-
+This driver is only supported as a loadable module at this time.  Intel is not supplying patches against the kernel source to allow for static linking of the driver.  For questions related to hardwarerequirements, refer to the documentation supplied with your Intel adapter.  All hardware requirements listed apply to use with Linux.
 .SH OPTIONS
 The following optional parameters are used by entering them on the command line with the modprobe command.  
 .LP
-
 .B InterruptThrottleRate
 .IP
 .B Valid Range: 
@@ -45,7 +39,6 @@ InterruptThrottleRate takes precedence over the TxAbsIntDelay and RxAbsIntDelay 
 .IP
 See the section "InterruptThrottleRate" in Readme.
 .LP
-
 .B RxIntDelay
 .IP
 .B Valid Range: 
@@ -58,7 +51,6 @@ This sets the delay of the generation of receive interrupts, in units of 1.024 m
 .IP
 CAUTION: When setting RxIntDelay to a value other than 0, adapters may hang (stop transmitting) under certain network conditions.  If this occurs a NETDEV WATCHDOG message is logged in the system event log.  In addition, the controller is automatically reset, restoring the network connection.  To eliminate the potential for the hang ensure that RxIntDelay is set to zero.
 .LP
-
 .B RxAbsIntDelay 
 .IP
 .B Valid Range: 
@@ -69,8 +61,6 @@ CAUTION: When setting RxIntDelay to a value other than 0, adapters may hang (sto
 .IP
 This limits the delay in which a receive interrupt is generated (in units of 1.024 microseconds).  Useful only if RxIntDelay is non-zero, this value ensures that an interrupt is generated after the initial packet is received within the set amount of time.  Proper tuning, along with RxIntDelay, may improve traffic throughput in specific network conditions.
 .LP
-
-
 .B TxIntDelay
 .IP
 .B Valid Range: 
@@ -81,7 +71,6 @@ This limits the delay in which a receive interrupt is generated (in units of 1.0
 .IP
 This sets the delay of the generation of transmit interrupts, in units of 1.024 microseconds.  Transmit interrupt reduction can improve CPU efficiency if properly tuned for specific network traffic.  If the system is reporting dropped transmits, this value may be set too high causing the driver to run out of available transmit descriptors.
 .LP
-
 .B TxAbsIntDelay 
 .IP
 .B Valid Range: 
@@ -92,7 +81,6 @@ This sets the delay of the generation of transmit interrupts, in units of 1.024 
 .IP
 This limits the delay in which a transmit interrupt is generated (in units of 1.024 microseconds).  Useful only if TxIntDelay is non-zero, this value ensures that an interrupt is generated after the initial packet is sent on the wire within the set amount of time.  Proper tuning, along with TxIntDelay, may improve traffic throughput in specific network conditions.
 .LP
-
 .B Copybreak
 .IP
 .B Valid Range:   
@@ -108,7 +96,6 @@ Driver copies all packets below or equaling this size to a fresh rx buffer befor
 .IP
 This parameter is different than other parameters, in that it is a single (not 1,1,1 etc.) parameter applied to all driver instances and it is also available during runtime at /sys/module/e1000e/parameters/copybreak
 .LP
-
 .B SmartPowerDownEnable
 .IP
 .B Valid Range: 
@@ -119,7 +106,6 @@ This parameter is different than other parameters, in that it is a single (not 1
 .IP
 Allows Phy to turn off in lower power states. The user can turn off this parameter in supported chipsets.
 .LP
-
 .B KumeranLockLoss
 .IP
 .B Valid Range: 
@@ -130,7 +116,6 @@ Allows Phy to turn off in lower power states. The user can turn off this paramet
 .IP
 This workaround skips resetting the Phy at shutdown for the initial silicon releases of ICH8 systems.
 .LP
-
 .B IntMode
 .IP
 .B Valid Range: 
@@ -145,7 +130,14 @@ driver will try other interrupt modes, from least to most compatible.  The
 interrupt order is MSI-X, MSI, Legacy.  If specifying MSI (IntMode=1) 
 interrupts, only MSI and Legacy will be attempted.
 .LP
-
+.B WriteProtectNVM
+.IP
+.B Valid Range:
+0-1
+.BDefault Value: 
+1 (enabled)
+.IP
+This option is applicable only on ICHx (8256x) parts.  By default, the NVM is write-protected in order to prevent malicious accesses of the mapped NVM control register space which could potentially corrupt the NVM resulting in an unusable LAN device.  This option is provided to override that protection in order to update the NVM as-needed via ethtool or other means.  Once any necessary NVM change is complete, it is highly recommended to reload the driver with this option set back to the default (enabled) to reinstate the write-protection.
 .SH JUMBO FRAMES
 .LP
 Jumbo Frames support is enabled by changing the MTU to a value larger than the default of 1500.  Use the ifconfig command to increase the MTU size.  For example:
@@ -161,18 +153,14 @@ Adapters based on the Intel(R) 82573V/E controllers do not support Jumbo Frames.
 .LP
 See the section "Jumbo Frames" in Readme.
 .LP
-
-
 .SH Ethtool
 .LP
 The driver utilizes the ethtool interface for driver configuration and diagnostics, as well as displaying statistical information.  Ethtool version 3 or later is required for this functionality, although we strongly recommend downloading the latest version at: http://sourceforge.net/projects/gkernel.
 .LP
-
 .SH SPEED AND DUPLEX SETTINGS
 .LP
 Speed and Duplex are configured through the Ethtool* utility.  Ethtool is included with all versions of Red Hat after Red Hat7.2.  For other Linux distributions, download and install Ethtool from the following website: http://sourceforge.net/projects/gkernel.  
 .LP
-
 .SH NAPI
 .LP
 NAPI (Rx polling mode) is supported in the e1000e driver.  NAPI is enabled by default. 
@@ -183,7 +171,6 @@ make CFLAGS_EXTRA=-DE1000E_NO_NAPI install
 .LP
 See www.cyberus.ca/~hadi/usenix-paper.tgz for more information on NAPI.
 .LP
-
 .SH SUPPORT
 .LP
 For additional information, including supported adapters, building, and installation, see the Readme file included with the driver.

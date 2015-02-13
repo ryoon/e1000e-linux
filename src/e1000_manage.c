@@ -26,7 +26,7 @@
 
 *******************************************************************************/
 
-#include "e1000_hw.h"
+#include "e1000.h"
 
 static u8 e1000_calculate_checksum(u8 *buffer, u32 length);
 
@@ -43,11 +43,8 @@ static u8 e1000_calculate_checksum(u8 *buffer, u32 length)
 	u32 i;
 	u8  sum = 0;
 
-	DEBUGFUNC("e1000_calculate_checksum");
-
 	if (!buffer)
 		return 0;
-
 	for (i = 0; i < length; i++)
 		sum += buffer[i];
 
@@ -64,31 +61,29 @@ static u8 e1000_calculate_checksum(u8 *buffer, u32 length)
  *  and also checks whether the previous command is completed.  It busy waits
  *  in case of previous command is not completed.
  **/
-s32 e1000_mng_enable_host_if_generic(struct e1000_hw * hw)
+s32 e1000_mng_enable_host_if_generic(struct e1000_hw *hw)
 {
 	u32 hicr;
 	s32 ret_val = E1000_SUCCESS;
 	u8  i;
 
-	DEBUGFUNC("e1000_mng_enable_host_if_generic");
-
 	/* Check that the host interface is enabled. */
-	hicr = E1000_READ_REG(hw, E1000_HICR);
+	hicr = er32(HICR);
 	if ((hicr & E1000_HICR_EN) == 0) {
-		DEBUGOUT("E1000_HOST_EN bit disabled.\n");
+		e_dbg("E1000_HOST_EN bit disabled.\n");
 		ret_val = -E1000_ERR_HOST_INTERFACE_COMMAND;
 		goto out;
 	}
 	/* check the previous command is completed */
 	for (i = 0; i < E1000_MNG_DHCP_COMMAND_TIMEOUT; i++) {
-		hicr = E1000_READ_REG(hw, E1000_HICR);
+		hicr = er32(HICR);
 		if (!(hicr & E1000_HICR_C))
 			break;
-		msec_delay_irq(1);
+		mdelay(1);
 	}
 
 	if (i == E1000_MNG_DHCP_COMMAND_TIMEOUT) {
-		DEBUGOUT("Previous command timeout failed .\n");
+		e_dbg("Previous command timeout failed .\n");
 		ret_val = -E1000_ERR_HOST_INTERFACE_COMMAND;
 		goto out;
 	}
@@ -108,22 +103,18 @@ bool e1000_check_mng_mode_generic(struct e1000_hw *hw)
 {
 	u32 fwsm;
 
-	DEBUGFUNC("e1000_check_mng_mode_generic");
-
-	fwsm = E1000_READ_REG(hw, E1000_FWSM);
-
-	return ((fwsm & E1000_FWSM_MODE_MASK) ==
-	        (E1000_MNG_IAMT_MODE << E1000_FWSM_MODE_SHIFT));
+	fwsm = er32(FWSM);
+	return (fwsm & E1000_FWSM_MODE_MASK) ==
+	        (E1000_MNG_IAMT_MODE << E1000_FWSM_MODE_SHIFT);
 }
-
 /**
- *  e1000_enable_tx_pkt_filtering_generic - Enable packet filtering on TX
+ *  e1000e_enable_tx_pkt_filtering - Enable packet filtering on TX
  *  @hw: pointer to the HW structure
  *
  *  Enables packet filtering on transmit packets if manageability is enabled
  *  and host interface is enabled.
  **/
-bool e1000_enable_tx_pkt_filtering_generic(struct e1000_hw *hw)
+bool e1000e_enable_tx_pkt_filtering(struct e1000_hw *hw)
 {
 	struct e1000_host_mng_dhcp_cookie *hdr = &hw->mng_cookie;
 	u32 *buffer = (u32 *)&hw->mng_cookie;
@@ -131,8 +122,6 @@ bool e1000_enable_tx_pkt_filtering_generic(struct e1000_hw *hw)
 	s32 ret_val, hdr_csum, csum;
 	u8 i, len;
 	bool tx_filter = true;
-
-	DEBUGFUNC("e1000_enable_tx_pkt_filtering_generic");
 
 	/* No manageability, no filtering */
 	if (!hw->mac.ops.check_mng_mode(hw)) {
@@ -182,21 +171,19 @@ out:
 }
 
 /**
- *  e1000_mng_write_dhcp_info_generic - Writes DHCP info to host interface
+ *  e1000e_mng_write_dhcp_info - Writes DHCP info to host interface
  *  @hw: pointer to the HW structure
  *  @buffer: pointer to the host interface
  *  @length: size of the buffer
  *
  *  Writes the DHCP information to the host interface.
  **/
-s32 e1000_mng_write_dhcp_info_generic(struct e1000_hw * hw, u8 *buffer,
+s32 e1000e_mng_write_dhcp_info(struct e1000_hw *hw, u8 *buffer,
                                       u16 length)
 {
 	struct e1000_host_mng_command_header hdr;
 	s32 ret_val;
 	u32 hicr;
-
-	DEBUGFUNC("e1000_mng_write_dhcp_info_generic");
 
 	hdr.command_id = E1000_MNG_DHCP_TX_PAYLOAD_CMD;
 	hdr.command_length = length;
@@ -221,8 +208,8 @@ s32 e1000_mng_write_dhcp_info_generic(struct e1000_hw * hw, u8 *buffer,
 		goto out;
 
 	/* Tell the ARC a new command is pending. */
-	hicr = E1000_READ_REG(hw, E1000_HICR);
-	E1000_WRITE_REG(hw, E1000_HICR, hicr | E1000_HICR_C);
+	hicr = er32(HICR);
+	ew32(HICR, hicr | E1000_HICR_C);
 
 out:
 	return ret_val;
@@ -235,12 +222,10 @@ out:
  *
  *  Writes the command header after does the checksum calculation.
  **/
-s32 e1000_mng_write_cmd_header_generic(struct e1000_hw * hw,
-                                    struct e1000_host_mng_command_header * hdr)
+s32 e1000_mng_write_cmd_header_generic(struct e1000_hw *hw,
+                                    struct e1000_host_mng_command_header *hdr)
 {
 	u16 i, length = sizeof(struct e1000_host_mng_command_header);
-
-	DEBUGFUNC("e1000_mng_write_cmd_header_generic");
 
 	/* Write the whole command header structure with new checksum. */
 
@@ -251,7 +236,7 @@ s32 e1000_mng_write_cmd_header_generic(struct e1000_hw * hw,
 	for (i = 0; i < length; i++) {
 		E1000_WRITE_REG_ARRAY_DWORD(hw, E1000_HOST_IF, i,
 		                            *((u32 *) hdr + i));
-		E1000_WRITE_FLUSH(hw);
+		e1e_flush();
 	}
 
 	return E1000_SUCCESS;
@@ -269,7 +254,7 @@ s32 e1000_mng_write_cmd_header_generic(struct e1000_hw * hw,
  *  It also does alignment considerations to do the writes in most efficient
  *  way.  Also fills up the sum of the buffer in *buffer parameter.
  **/
-s32 e1000_mng_host_if_write_generic(struct e1000_hw * hw, u8 *buffer,
+s32 e1000_mng_host_if_write_generic(struct e1000_hw *hw, u8 *buffer,
                                     u16 length, u16 offset, u8 *sum)
 {
 	u8 *tmp;
@@ -277,8 +262,6 @@ s32 e1000_mng_host_if_write_generic(struct e1000_hw * hw, u8 *buffer,
 	u32 data = 0;
 	s32 ret_val = E1000_SUCCESS;
 	u16 remaining, i, j, prev_bytes;
-
-	DEBUGFUNC("e1000_mng_host_if_write_generic");
 
 	/* sum = only sum of the data and it is not checksum */
 
@@ -318,7 +301,8 @@ s32 e1000_mng_host_if_write_generic(struct e1000_hw * hw, u8 *buffer,
 			*sum += *(tmp + j);
 		}
 
-		E1000_WRITE_REG_ARRAY_DWORD(hw, E1000_HOST_IF, offset + i, data);
+		E1000_WRITE_REG_ARRAY_DWORD(hw, E1000_HOST_IF, offset + i,
+		                            data);
 	}
 	if (remaining) {
 		for (j = 0; j < sizeof(u32); j++) {
@@ -337,31 +321,29 @@ out:
 }
 
 /**
- *  e1000_enable_mng_pass_thru - Enable processing of ARP's
+ *  e1000e_enable_mng_pass_thru - Enable processing of ARP's
  *  @hw: pointer to the HW structure
  *
  *  Verifies the hardware needs to allow ARPs to be processed by the host.
  **/
-bool e1000_enable_mng_pass_thru(struct e1000_hw *hw)
+bool e1000e_enable_mng_pass_thru(struct e1000_hw *hw)
 {
 	u32 manc;
 	u32 fwsm, factps;
 	bool ret_val = false;
 
-	DEBUGFUNC("e1000_enable_mng_pass_thru");
-
 	if (!hw->mac.asf_firmware_present)
 		goto out;
 
-	manc = E1000_READ_REG(hw, E1000_MANC);
+	manc = er32(MANC);
 
 	if (!(manc & E1000_MANC_RCV_TCO_EN) ||
 	    !(manc & E1000_MANC_EN_MAC_ADDR_FILTER))
 		goto out;
 
 	if (hw->mac.arc_subsystem_valid) {
-		fwsm = E1000_READ_REG(hw, E1000_FWSM);
-		factps = E1000_READ_REG(hw, E1000_FACTPS);
+		fwsm = er32(FWSM);
+		factps = er32(FACTPS);
 
 		if (!(factps & E1000_FACTPS_MNGCG) &&
 		    ((fwsm & E1000_FWSM_MODE_MASK) ==

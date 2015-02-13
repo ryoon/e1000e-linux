@@ -34,7 +34,6 @@
 #define ICH_FLASH_HSFCTL                 0x0006
 #define ICH_FLASH_FADDR                  0x0008
 #define ICH_FLASH_FDATA0                 0x0010
-#define ICH_FLASH_PR0                    0x0074
 
 #define ICH_FLASH_READ_COMMAND_TIMEOUT   500
 #define ICH_FLASH_WRITE_COMMAND_TIMEOUT  500
@@ -48,8 +47,6 @@
 
 #define FLASH_GFPREG_BASE_MASK           0x1FFF
 #define FLASH_SECTOR_ADDR_SHIFT          12
-
-#define E1000_SHADOW_RAM_WORDS           2048
 
 #define ICH_FLASH_SEG_SIZE_256           256
 #define ICH_FLASH_SEG_SIZE_4K            4096
@@ -120,25 +117,10 @@
 #define E1000_RXDEXT_LINKSEC_ERROR_BAD_SIG      0x60000000
 
 
-/* ICH Flash Protected Region */
-union ich8_flash_protected_range {
-	struct ich8_pr {
-		u32 base:13;     /* 0:12 Protected Range Base */
-		u32 reserved1:2; /* 13:14 Reserved */
-		u32 rpe:1;       /* 15 Read Protection Enable */
-		u32 limit:13;    /* 16:28 Protected Range Limit */
-		u32 reserved2:2; /* 29:30 Reserved */
-		u32 wpe:1;       /* 31 Write Protection Enable */
-	} range;
-	u32 regval;
-};
-
-void e1000_set_kmrn_lock_loss_workaround_ich8lan(struct e1000_hw *hw,
+void e1000e_set_kmrn_lock_loss_workaround_ich8lan(struct e1000_hw *hw,
                                                  bool state);
-void e1000e_write_protect_nvm_ich8lan(struct e1000_hw *hw);
-
-void e1000_igp3_phy_powerdown_workaround_ich8lan(struct e1000_hw *hw);
-void e1000_gig_downshift_workaround_ich8lan(struct e1000_hw *hw);
-void e1000_disable_gig_wol_ich8lan(struct e1000_hw *hw);
+void e1000e_igp3_phy_powerdown_workaround_ich8lan(struct e1000_hw *hw);
+void e1000e_gig_downshift_workaround_ich8lan(struct e1000_hw *hw);
+void e1000e_disable_gig_wol_ich8lan(struct e1000_hw *hw);
 
 #endif

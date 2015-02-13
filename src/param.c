@@ -58,7 +58,7 @@ MODULE_PARM_DESC(copybreak,
 /* Module Parameters are always initialized to -1, so that the driver
  * can tell the difference between no user specified value or the
  * user asking for the default value.
- * The true default values are loaded in when e1000_check_options is called.
+ * The true default values are loaded in when e1000e_check_options is called.
  *
  * This is a GCC extension to ANSI C.
  * See the item "Labeled Elements in Initializers" in the section
@@ -77,6 +77,7 @@ MODULE_PARM_DESC(copybreak,
 	module_param_array_named(X, X, int, &num_##X, 0);	\
 	MODULE_PARM_DESC(X, desc);
 #endif
+
 
 /*
  * Transmit Interrupt Delay in units of 1.024 microseconds
@@ -161,15 +162,14 @@ E1000_PARAM(SmartPowerDownEnable, "Enable PHY smart power down");
 E1000_PARAM(KumeranLockLoss, "Enable Kumeran lock loss workaround");
 
 /*
- * Write Protect NVM
+ * Enable CRC Stripping
  *
  * Valid Range: 0, 1
  *
  * Default Value: 1 (enabled)
  */
-E1000_PARAM(WriteProtectNVM, "Write-protect NVM [WARNING: disabling this can "
-                             "lead to corrupted NVM]");
-
+E1000_PARAM(CrcStripping, "Enable CRC Stripping, disable if your BMC needs " \
+                          "the CRC");
 
 struct e1000_option {
 	enum { enable_option, range_option, list_option } type;
@@ -239,7 +239,7 @@ static int __devinit e1000_validate_option(unsigned int *value,
 }
 
 /**
- * e1000_check_options - Range Checking for Command Line Parameters
+ * e1000e_check_options - Range Checking for Command Line Parameters
  * @adapter: board private structure
  *
  * This routine checks all command line parameters for valid user
@@ -247,7 +247,7 @@ static int __devinit e1000_validate_option(unsigned int *value,
  * value exists, a default value is used.  The final value is stored
  * in a variable in the adapter structure.
  **/
-void __devinit e1000_check_options(struct e1000_adapter *adapter)
+void __devinit e1000e_check_options(struct e1000_adapter *adapter)
 {
 	struct e1000_hw *hw = &adapter->hw;
 	int bd = adapter->bd_number;
@@ -305,15 +305,6 @@ void __devinit e1000_check_options(struct e1000_adapter *adapter)
 			.arg  = { .r = { .min = MIN_RXDELAY,
 					 .max = MAX_RXDELAY } }
 		};
-
-		/*
-		 * modify min and default if 82573 for slow ping w/a,
-		 * a value greater than 8 needs to be set for RDTR
-		 */
-		if (adapter->flags & FLAG_HAS_ASPM) {
-			opt.def = 32;
-			opt.arg.r.min = 8;
-		}
 
 		if (num_RxIntDelay > bd) {
 			adapter->rx_int_delay = RxIntDelay[bd];
@@ -376,7 +367,7 @@ void __devinit e1000_check_options(struct e1000_adapter *adapter)
 				 * change itr.
 				 */
 				if (e1000_validate_option(&adapter->itr, &opt,
-				                          adapter) &&
+							  adapter) &&
 				    (adapter->itr == 3)) {
 					/*
 					 * In case of invalid user value,
@@ -407,7 +398,7 @@ void __devinit e1000_check_options(struct e1000_adapter *adapter)
 			.err  = "defaulting to 2 (MSI-X)",
 			.def  = E1000E_INT_MODE_MSIX,
 			.arg  = { .r = { .min = MIN_INTMODE,
-			.max = MAX_INTMODE }}
+					 .max = MAX_INTMODE } }
 		};
 
 		if (num_IntMode > bd) {
@@ -435,6 +426,21 @@ void __devinit e1000_check_options(struct e1000_adapter *adapter)
 				adapter->flags |= FLAG_SMART_POWER_DOWN;
 		}
 	}
+	{ /* CRC Stripping */
+		const struct e1000_option opt = {
+			.type = enable_option,
+			.name = "CRC Stripping",
+			.err  = "defaulting to enabled",
+			.def  = OPTION_ENABLED
+		};
+		
+		if (num_CrcStripping > bd) {
+			unsigned int crc_stripping = CrcStripping[bd];
+			e1000_validate_option(&crc_stripping, &opt, adapter);
+			if (crc_stripping == OPTION_ENABLED)
+				adapter->flags2 |= FLAG2_CRC_STRIPPING;
+		}
+	}
 	{ /* Kumeran Lock Loss Workaround */
 		const struct e1000_option opt = {
 			.type = enable_option,
@@ -447,33 +453,12 @@ void __devinit e1000_check_options(struct e1000_adapter *adapter)
 			unsigned int kmrn_lock_loss = KumeranLockLoss[bd];
 			e1000_validate_option(&kmrn_lock_loss, &opt, adapter);
 			if (hw->mac.type == e1000_ich8lan)
-				e1000_set_kmrn_lock_loss_workaround_ich8lan(hw,
+				e1000e_set_kmrn_lock_loss_workaround_ich8lan(hw,
 								kmrn_lock_loss);
 		} else {
 			if (hw->mac.type == e1000_ich8lan)
-				e1000_set_kmrn_lock_loss_workaround_ich8lan(hw,
+				e1000e_set_kmrn_lock_loss_workaround_ich8lan(hw,
 								       opt.def);
-		}
-	}
-	{ /* Write-protect NVM */
-		const struct e1000_option opt = {
-			.type = enable_option,
-			.name = "Write-protect NVM",
-			.err  = "defaulting to Enabled",
-			.def  = OPTION_ENABLED
-		};
-
-		if (adapter->flags & FLAG_IS_ICH) {
-			if (num_WriteProtectNVM > bd) {
-				unsigned int write_protect_nvm = WriteProtectNVM[bd];
-				e1000_validate_option(&write_protect_nvm, &opt,
-				                      adapter);
-				if (write_protect_nvm)
-					adapter->flags2 |= FLAG2_READ_ONLY_NVM;
-			} else {
-				if (opt.def)
-					adapter->flags2 |= FLAG2_READ_ONLY_NVM;
-			}
 		}
 	}
 }

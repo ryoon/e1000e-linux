@@ -47,7 +47,7 @@
 
 #define E1000_RXCFGL    0x0B634 /* TimeSync Rx EtherType & Msg Type Reg - RW */
 
-bool e1000_get_laa_state_82571(struct e1000_hw *hw);
-void e1000_set_laa_state_82571(struct e1000_hw *hw, bool state);
+bool e1000e_get_laa_state_82571(struct e1000_hw *hw);
+void e1000e_set_laa_state_82571(struct e1000_hw *hw, bool state);
 
 #endif

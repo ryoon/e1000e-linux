@@ -15,12 +15,11 @@
 		8086 005e  PRO/1000 PT Dual Port Server Connection
 		8086 105e  PRO/1000 PT Dual Port Network Connection
 		8086 115e  PRO/1000 PT Dual Port Server Adapter
-		8086 116e  PRO/1000 PT Dual Port Server Adapter
 		8086 125e  PRO/1000 PT Dual Port Server Adapter
 		8086 135e  PRO/1000 PT Dual Port Server Adapter
 	105f  82571EB Gigabit Ethernet Controller
+		8086 005a  PRO/1000 PF Dual Port Server Adapter
 		8086 115f  PRO/1000 PF Dual Port Server Adapter
-		8086 116f  PRO/1000 PF Dual Port Server Adapter
 		8086 125f  PRO/1000 PF Dual Port Server Adapter
 		8086 135f  PRO/1000 PF Dual Port Server Adapter
 	1060  82571EB Gigabit Ethernet Controller
@@ -66,7 +65,7 @@
 	10cc  82567LM-2 Gigabit Network Connection
 	10cd  82567LF-2 Gigabit Network Connection
 	10ce  82567V-2 Gigabit Network Connection
-	10d3  82574L  Gigabit Network Connection
+	10d3  82574L Gigabit Network Connection
 		8086 a01f  Gigabit CT Desktop Adapter
 	10d5  82571PT Gigabit PT Quad Port Server ExpressModule
 	10d9  82571EB Dual Port Gigabit Mezzanine Adapter

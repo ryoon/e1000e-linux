@@ -1,7 +1,7 @@
 Linux* Base Driver for Intel(R) Network Connection
 ===============================================================
 
-August 18, 2008
+October 14, 2008
 
 Contents
 ========
@@ -110,7 +110,7 @@ NOTE: For the build to work properly, the currently running kernel MUST
 
 4. Compile the driver module:
 
-     make install
+     # make install
 
    The binary will be installed as:
 
@@ -151,7 +151,7 @@ TROUBLESHOOTING: Some systems have trouble supporting MSI and/or MSI-X
 interrupts.  If you believe your system needs to disable this style of 
 interrupt, the driver can be built and installed with the command:
 
-     make CFLAGS_EXTRA=-DDISABLE_PCI_MSI install
+     # make CFLAGS_EXTRA=-DDISABLE_PCI_MSI install
 
 Normally the driver will generate an interrupt every two seconds, so if
 you can see that you're no longer getting interrupts in
@@ -178,7 +178,6 @@ NOTES:  For more information about the InterruptThrottleRate,
 
         A descriptor describes a data buffer and attributes related to
         the data buffer.  This information is accessed by the hardware.
-
 
 
 InterruptThrottleRate
@@ -349,7 +348,7 @@ silicon releases of ICH8 systems.
 IntMode
 -------
 Valid Range: 0-2
-Default Value: 1 
+Default Value: 2 
 (0=legacy, 1=MSI, 2=MSI-X)
 
 Allows changing the interrupt mode at module load time, without requiring a
@@ -357,6 +356,21 @@ recompile. If the driver load fails to enable a specific interrupt mode, the
 driver will try other interrupt modes, from least to most compatible.  The 
 interrupt order is MSI-X, MSI, Legacy.  If specifying MSI (IntMode=1) 
 interrupts, only MSI and Legacy will be attempted.
+
+
+WriteProtectNVM
+---------------
+Valid Range:   0-1
+Default Value: 1 (enabled)
+
+This option is applicable only on ICHx (8256x) parts.  By default, the NVM is
+write-protected in order to prevent malicious accesses of the mapped NVM 
+control register space which could potentially corrupt the NVM resulting in 
+an unusable LAN device.  This option is provided to override that protection
+in order to update the NVM as-needed via ethtool or other means.  Once any 
+necessary NVM change is complete, it is highly recommended to reload the 
+driver with this option set back to the default (enabled) to reinstate the 
+write-protection.
 
 
 Additional Configurations
@@ -374,9 +388,9 @@ Additional Configurations
   asked for the driver or module name, the name for the Linux Base Driver
   for the Gigabit Family of Adapters is e1000e.
 
-  As an example, if you install the e1000e driver for two Gigabit adapters
-  (eth0 and eth1) and set the speed and duplex to 10full and 100half, add
-  the following to modules.conf or or modprobe.conf:
+  As an example, if you install the e1000e driver for two Gigabit adapters 
+  (eth0 and eth1) and want to set the interrupt mode to MSI-X and MSI 
+  respectively, add the following to modules.conf or /etc/modprobe.conf:
 
        alias eth0 e1000e
        alias eth1 e1000e
@@ -483,7 +497,7 @@ Additional Configurations
 
   To disable NAPI, compile the driver module, passing in a configuration option:
 
-       make CFLAGS_EXTRA=-DE1000E_NO_NAPI install
+       # make CFLAGS_EXTRA=-DE1000E_NO_NAPI install
 
   See www.cyberus.ca/~hadi/usenix-paper.tgz for more information on NAPI.
 
@@ -524,7 +538,7 @@ that can be obtained at http://www.linuxfirmwarekit.org/
 Adapters with 4 ports behind a PCIe bridge 
 ------------------------------------------
 Adapters that have 4 ports behind a PCIe bridge may be incompatible with 
-some systems. The user should run the Linux firmware kit from 
+some systems. The user should run the Linux firmware kit from 2686434
 http://www.linuxfirmwarekit.org to test their BIOS, if they have interrupt or 
 "missing interface" problems, especially with older kernels.
 
@@ -584,7 +598,7 @@ error may occur:
 To solve this issue, create the version.h file by going to the Linux source
 tree and entering:
 
-    make include/linux/version.h.
+    # make include/linux/version.h.
 
 Jumbo Frames System Requirement
 -------------------------------

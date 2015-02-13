@@ -30,23 +30,23 @@
 #define _E1000_MANAGE_H_
 
 bool e1000_check_mng_mode_generic(struct e1000_hw *hw);
-bool e1000_enable_tx_pkt_filtering_generic(struct e1000_hw *hw);
+bool e1000e_enable_tx_pkt_filtering(struct e1000_hw *hw);
 s32  e1000_mng_enable_host_if_generic(struct e1000_hw *hw);
 s32  e1000_mng_host_if_write_generic(struct e1000_hw *hw, u8 *buffer,
                                      u16 length, u16 offset, u8 *sum);
 s32  e1000_mng_write_cmd_header_generic(struct e1000_hw *hw,
                                     struct e1000_host_mng_command_header *hdr);
-s32  e1000_mng_write_dhcp_info_generic(struct e1000_hw *hw,
+s32  e1000e_mng_write_dhcp_info(struct e1000_hw *hw,
                                        u8 *buffer, u16 length);
-bool e1000_enable_mng_pass_thru(struct e1000_hw *hw);
+bool e1000e_enable_mng_pass_thru(struct e1000_hw *hw);
 
-typedef enum {
+enum e1000_mng_mode {
 	e1000_mng_mode_none = 0,
 	e1000_mng_mode_asf,
 	e1000_mng_mode_pt,
 	e1000_mng_mode_ipmi,
 	e1000_mng_mode_host_if_only
-} e1000_mng_mode;
+};
 
 #define E1000_FACTPS_MNGCG    0x20000000
 

@@ -55,6 +55,7 @@
 #define NAPI
 #endif
 
+
 #ifdef _E1000_H_
 #ifdef CONFIG_E1000_NAPI
 #define NAPI
@@ -80,10 +81,12 @@
 
 
 
+
 #ifdef DRIVER_E1000E
 #define adapter_struct e1000_adapter
 #define CONFIG_E1000E_MSIX
 #endif
+
 
 
 
@@ -139,6 +142,7 @@ struct msix_entry {
 #define PMSG_SUSPEND 3
 #endif
 
+
 /* generic boolean compatibility */
 #undef TRUE
 #undef FALSE
@@ -170,6 +174,10 @@ struct msix_entry {
 
 #ifndef PCI_CAP_ID_EXP
 #define PCI_CAP_ID_EXP 0x10
+#endif
+
+#ifndef PCIE_LINK_STATE_L0S
+#define PCIE_LINK_STATE_L0S 1
 #endif
 
 #ifndef mmiowb
@@ -715,16 +723,6 @@ extern int _kc_is_valid_ether_addr(u8 *addr);
 extern int _kc_pci_set_power_state(struct pci_dev *dev, int state);
 #endif
 
-#ifndef pci_save_state
-#define pci_save_state _kc_pci_save_state
-extern int _kc_pci_save_state(struct pci_dev *dev, u32 *buffer);
-#endif
-
-#ifndef pci_restore_state
-#define pci_restore_state _kc_pci_restore_state
-extern int _kc_pci_restore_state(struct pci_dev *pdev, u32 *buffer);
-#endif
-
 #ifndef pci_enable_wake
 #define pci_enable_wake _kc_pci_enable_wake
 extern int _kc_pci_enable_wake(struct pci_dev *pdev, u32 state, int enable);
@@ -947,6 +945,8 @@ static inline u32 _kc_netif_msg_init(int debug_value, int default_msg_enable_bit
 
 #define dev_err(__unused_dev, format, arg...)            \
 	printk(KERN_ERR "%s: " format, pci_name(adapter->pdev) , ## arg)
+#define dev_warn(__unused_dev, format, arg...)            \
+	printk(KERN_WARNING "%s: " format, pci_name(pdev) , ## arg)
 
 /* hlist_* code - double linked lists */
 struct hlist_head {
@@ -1019,6 +1019,10 @@ static inline void INIT_HLIST_NODE(struct hlist_node *h)
 #define might_sleep()
 #endif
 
+#ifndef NETREG_REGISTERED
+#define NETREG_REGISTERED 1
+#define reg_state deadbeaf
+#endif
 #endif /* <= 2.5.0 */
 
 /*****************************************************************************/
@@ -1040,6 +1044,7 @@ static inline void _kc_synchronize_irq(void)
 #define container_of list_entry
 #define schedule_work schedule_task
 #define flush_scheduled_work flush_scheduled_tasks
+#define cancel_work_sync(x) flush_scheduled_work()
 
 #endif /* 2.5.28 => 2.4.17 */
 
@@ -1066,6 +1071,10 @@ extern void _kc_skb_fill_page_desc(struct sk_buff *skb, int i, struct page *page
 
 #undef ALIGN
 #define ALIGN(x,a) (((x)+(a)-1)&~((a)-1))
+
+#ifndef page_count
+#define page_count(p) atomic_read(&(p)->count)
+#endif
 
 /* find_first_bit and find_next bit are not defined for most
  * 2.4 kernels (except for the redhat 2.4.21 kernels
@@ -1176,6 +1185,16 @@ static inline unsigned long _kc_msleep_interruptible(unsigned int msecs)
 /* Basic mode control register. */
 #define BMCR_SPEED1000		0x0040  /* MSB of Speed (1000)         */
 
+#ifndef __le16
+#define __le16 u16
+#endif
+#ifndef __le32
+#define __le32 u32
+#endif
+#ifndef __le64
+#define __le64 u64
+#endif
+
 #ifdef pci_dma_mapping_error
 #undef pci_dma_mapping_error
 #endif
@@ -1187,44 +1206,6 @@ static inline int _kc_pci_dma_mapping_error(struct pci_dev *pdev,
 }
 
 #endif /* < 2.6.9 */
-
-/*****************************************************************************/
-#if ( LINUX_VERSION_CODE >= KERNEL_VERSION(2,4,6) && \
-      LINUX_VERSION_CODE < KERNEL_VERSION(2,6,10) )
-#ifdef pci_save_state
-#undef pci_save_state
-#endif
-#define pci_save_state(X) { \
-        int i; \
-        if (adapter->pci_state) { \
-                for (i = 0; i < 16; i++) { \
-                        pci_read_config_dword((X), \
-                                              i * 4, \
-                                              &adapter->pci_state[i]); \
-                } \
-        } \
-}
-
-#ifdef pci_restore_state
-#undef pci_restore_state
-#endif
-#define pci_restore_state(X) { \
-        int i; \
-        if (adapter->pci_state) { \
-                for (i = 0; i < 16; i++) { \
-                        pci_write_config_dword((X), \
-                                               i * 4, \
-                                               adapter->pci_state[i]); \
-                } \
-        } else { \
-                for (i = 0; i < 6; i++) { \
-                        pci_write_config_dword((X), \
-                                               PCI_BASE_ADDRESS_0 + (i * 4), \
-                                               (X)->resource[i].start); \
-                } \
-        } \
-}
-#endif /* 2.4.6 <= x < 2.6.10 */
 
 /*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,10) )
@@ -1248,6 +1229,7 @@ static inline int _kc_pci_dma_mapping_error(struct pci_dev *pdev,
 #define PCI_D3cold  4
 #define pci_choose_state(pdev,state) state
 #define PMSG_SUSPEND 3
+#define PCI_EXP_LNKCTL	16
 
 #undef NETIF_F_LLTX
 
@@ -1370,7 +1352,6 @@ static inline int _kc_skb_is_gso(const struct sk_buff *skb)
 #ifndef DIV_ROUND_UP
 #define DIV_ROUND_UP(n,d) (((n) + (d) - 1) / (d))
 #endif
-
 #if ( LINUX_VERSION_CODE >= KERNEL_VERSION(2,5,0) )
 #ifndef RHEL_RELEASE_CODE
 #define RHEL_RELEASE_CODE 0
@@ -1393,7 +1374,7 @@ static inline irqreturn_t _kc_request_irq(unsigned int irq, new_handler_t handle
 typedef void (*irq_handler_t)(int, void*, struct pt_regs *);
 typedef void (*new_handler_t)(int, void*);
 static inline int _kc_request_irq(unsigned int irq, new_handler_t handler, unsigned long flags, const char *devname, void *dev_id)
-#endif
+#endif /* >= 2.5.x */
 {
 	irq_handler_t new_handler = (irq_handler_t) handler;
 	return request_irq(irq, new_handler, flags, devname, dev_id);
@@ -1403,7 +1384,6 @@ static inline int _kc_request_irq(unsigned int irq, new_handler_t handler, unsig
 #define request_irq(irq, handler, flags, devname, dev_id) _kc_request_irq((irq), (handler), (flags), (devname), (dev_id))
 
 #define irq_handler_t new_handler_t
-
 /* pci_restore_state and pci_save_state handles MSI/PCIE from 2.6.19 */
 #define PCIE_CONFIG_SPACE_LEN 256
 #define PCI_CONFIG_SPACE_LEN 64
@@ -1414,51 +1394,19 @@ static inline int _kc_request_irq(unsigned int irq, new_handler_t handler, unsig
 		size = PCIE_CONFIG_SPACE_LEN; \
 }
 #else
-#define pci_config_space_ich8lan()
+#define pci_config_space_ich8lan() do {} while (0)
 #endif
 #undef pci_save_state
-#define pci_save_state(pdev) _kc_pci_save_state(adapter)
-#define _kc_pci_save_state(adapter) 0; { \
-	int size = PCI_CONFIG_SPACE_LEN, i; \
-	u16 pcie_cap_offset = pci_find_capability(pdev, PCI_CAP_ID_EXP); \
-	u16 pcie_link_status; \
-	\
-	if (pcie_cap_offset) { \
-	if (!pci_read_config_word(pdev, pcie_cap_offset + PCIE_LINK_STATUS, \
-				  &pcie_link_status)) \
-		size = PCIE_CONFIG_SPACE_LEN; \
-	} \
-	pci_config_space_ich8lan(); \
-	WARN_ON(adapter->config_space != NULL); \
-	adapter->config_space = kmalloc(size, GFP_KERNEL); \
-	if (!adapter->config_space) { \
-		printk(KERN_ERR "Out of memory in pci_save_state\n"); \
-		return -ENOMEM; \
-	} \
-	for (i = 0; i < (size / 4); i++) \
-		pci_read_config_dword(pdev, i * 4, &adapter->config_space[i]); \
-}
+extern int _kc_pci_save_state(struct pci_dev *);
+#define pci_save_state(pdev) _kc_pci_save_state(pdev)
 #undef pci_restore_state
-#define pci_restore_state(pdev) _kc_pci_restore_state(adapter)
-#define _kc_pci_restore_state(adapter) { \
-	int size = PCI_CONFIG_SPACE_LEN, i; \
-	u16 pcie_cap_offset; \
-	u16 pcie_link_status; \
-	\
-	if (adapter->config_space != NULL) { \
-	pcie_cap_offset = pci_find_capability(pdev, PCI_CAP_ID_EXP); \
-	if (pcie_cap_offset) { \
-	if (!pci_read_config_word(pdev, pcie_cap_offset + PCIE_LINK_STATUS, \
-				  &pcie_link_status)) \
-		size = PCIE_CONFIG_SPACE_LEN; \
-	} \
-	pci_config_space_ich8lan(); \
-	for (i = 0; i < (size / 4); i++) \
-		pci_write_config_dword(pdev, i * 4, adapter->config_space[i]); \
-	kfree(adapter->config_space); \
-	adapter->config_space = NULL; \
-	} \
-}
+extern void _kc_pci_restore_state(struct pci_dev *);
+#define pci_restore_state(pdev) _kc_pci_restore_state(pdev)
+#ifdef HAVE_PCI_ERS
+#undef free_netdev
+extern void _kc_free_netdev(struct net_device *);
+#define free_netdev(netdev) _kc_free_netdev(netdev)
+#endif
 
 #endif /* < 2.6.19 */
 /*****************************************************************************/
@@ -1495,6 +1443,9 @@ do { \
 #define vlan_group_set_device(vg, id, dev) if (vg) vg->vlan_devices[id] = dev;
 #define pci_channel_offline(pdev) (pdev->error_state && \
 	pdev->error_state != pci_channel_io_normal)
+#define pci_request_selected_regions(pdev, bars, name) \
+        pci_request_regions(pdev, name)
+#define pci_release_selected_regions(pdev, bars) pci_release_regions(pdev);
 #endif /* < 2.6.21 */
 
 /*****************************************************************************/
@@ -1523,6 +1474,7 @@ do { \
 #ifndef ETH_FCS_LEN
 #define ETH_FCS_LEN 4
 #endif
+#define cancel_work_sync(x) flush_scheduled_work()
 #endif /* < 2.6.22 */
 
 /*****************************************************************************/
@@ -1538,6 +1490,7 @@ do { \
 struct napi_struct {
 	/* used to look up the real NAPI polling routine */
 	int (*poll)(struct napi_struct *, int);
+	struct net_device poll_dev;
 	int weight;
 };
 #ifdef NAPI
@@ -1550,13 +1503,14 @@ extern int __kc_adapter_clean(struct net_device *, int *);
 #define napi_disable(napi) netif_poll_disable(adapter->netdev)
 #define netif_napi_add(_netdev, _napi, _poll, _weight) \
 	do { \
-		struct napi_struct *__napi = _napi; \
+		struct napi_struct *__napi = (_napi); \
 		_netdev->poll = &(__kc_adapter_clean); \
 		_netdev->weight = (_weight); \
 		__napi->poll = &(_poll); \
 		__napi->weight = (_weight); \
 		netif_poll_disable(_netdev); \
 	} while (0)
+#define netif_napi_del(_a) do {} while (0)
 #else /* NAPI */
 #define netif_napi_add(_netdev, _napi, _poll, _weight) \
 	do { \
@@ -1566,6 +1520,7 @@ extern int __kc_adapter_clean(struct net_device *, int *);
 		__napi->poll = &(_poll); \
 		__napi->weight = (_weight); \
 	} while (0)
+#define netif_napi_del(_a) do {} while (0)
 #endif /* NAPI */
 
 #undef dev_get_by_name
@@ -1603,19 +1558,46 @@ extern int __kc_adapter_clean(struct net_device *, int *);
 }
 #endif /* > 2.6.18 */
 
+#define pci_enable_device_mem(pdev) pci_enable_device(pdev)
+
 #endif /* < 2.6.25 */
 
 /*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,26) )
+#else /* < 2.6.26 */
+#include <linux/pci-aspm.h>
 #endif /* < 2.6.26 */
 
 /*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,27) )
+#ifndef netif_napi_del
+#define netif_napi_del(_a) do {} while (0)
+#ifdef NAPI
+#ifdef CONFIG_NETPOLL
+#undef netif_napi_del
+#define netif_napi_del(_a) list_del(&(_a)->dev_list);
+#endif
+#endif
+#endif /* netif_napi_del */
 #ifndef pci_dma_mapping_error
 #define pci_dma_mapping_error(pdev, dma_addr) pci_dma_mapping_error(dma_addr)
 #endif
-#endif /* < 2.6.27 */
 
+#ifdef CONFIG_NETDEVICES_MULTIQUEUE
+#endif
+
+#ifdef HAVE_TX_MQ
+extern void _kc_netif_tx_stop_all_queues(struct net_device *);
+extern void _kc_netif_tx_wake_all_queues(struct net_device *);
+extern void _kc_netif_tx_start_all_queues(struct net_device *);
+#define netif_tx_stop_all_queues(a) _kc_netif_tx_stop_all_queues(a)
+#define netif_tx_wake_all_queues(a) _kc_netif_tx_wake_all_queues(a)
+#define netif_tx_start_all_queues(a) _kc_netif_tx_start_all_queues(a)
+#else /* CONFIG_NETDEVICES_MULTIQUEUE */
+#define netif_tx_stop_all_queues(a) netif_stop_queue(a)
+#define netif_tx_wake_all_queues(a) netif_wake_queue(a)
+#define netif_tx_start_all_queues(a) netif_start_queue(a)
+#endif /* CONFIG_NETDEVICES_MULTIQUEUE */
 #ifndef NETIF_F_MULTI_QUEUE
 #define NETIF_F_MULTI_QUEUE 0
 #define netif_is_multiqueue(a) 0
@@ -1623,5 +1605,8 @@ extern int __kc_adapter_clean(struct net_device *, int *);
 #define netif_wake_subqueue(a, b)
 #define netif_start_subqueue(a, b)
 #endif /* NETIF_F_MULTI_QUEUE */
+#else /* < 2.6.27 */
+#define HAVE_TX_MQ
+#endif /* < 2.6.27 */
 
 #endif /* _KCOMPAT_H_ */
