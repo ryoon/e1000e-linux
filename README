@@ -1,7 +1,7 @@
 Linux* Base Driver for Intel(R) Ethernet Network Connection
 ===========================================================
 
-January 5, 2012
+October 24, 2012
 
 Contents
 ========
@@ -19,7 +19,7 @@ In This Release
 ===============
 
 This file describes the e1000e Linux* Base Driver for Intel Ethernet Network
-Connection.  This driver supports kernel versions 2.4.x and 2.6.x.  This 
+Connection.  This driver supports kernel versions 2.4.x, 2.6.x, and 3.x.  This 
 driver includes support for Itanium(R)2-based systems.
 
 NOTE: The 82546GB part requires the e1000 driver, not the e1000e driver.
@@ -152,14 +152,15 @@ may be necessary.
 Command Line Parameters
 =======================
 
-If the driver is built as a module, the  following optional parameters
-are used by entering them on the command line with the modprobe command
-using this syntax:
+If the driver is built as a module, the following optional parameters are used by entering them on the command line with the modprobe command using this syntax:
 
-     modprobe e1000e [<option>=<VAL1>,<VAL2>,...]
+   modprobe e1000e [<option>=<VAL1>,<VAL2>,...]
 
-The default value for each parameter is generally the recommended setting,
-unless otherwise noted.
+There needs to be a <VAL#> for each network port in the system supported by this driver. The values will be applied to each instance, in function order. For example:
+
+   modprobe e1000e InterruptThrottleRate=16000,16000
+
+In this case, there are two network ports supported by e1000e in the system. The default value for each parameter is generally the recommended setting, unless otherwise noted.
 
 NOTES:  For more information about the InterruptThrottleRate,
         RxIntDelay, TxIntDelay, RxAbsIntDelay, and TxAbsIntDelay
@@ -383,6 +384,18 @@ both. 
 Additional Configurations
 =========================
 
+   IEEE 1588 Precision Time Protocol (PTP) Hardware Clock (PHC)
+  ------------------------------------------------------------
+  Support for the IEEE 1588 Precision Time Protocol (PTP) Hardware Clock (PHC)
+  is disabled by default in this out-of-tree driver even if it is enabled for 
+  the in-kernel driver. 
+
+  The feature is available only on a subset of devices supported by the 
+  driver, and can only be enabled on 3.0 and newer kernels that also have
+  the PTP_1588_CLOCK support compiled in statically or as a module. To enable
+  the feature when compiling the driver, add 'CFLAGS_EXTRA=-DE1000E_PTP' to 
+  the command line.
+
   Configuring the Driver on Different Distributions
   -------------------------------------------------
   Configuring a network driver to load properly when the system is started
@@ -518,7 +531,6 @@ Additional Configurations
 
   See ftp://robur.slu.se/pub/Linux/net-development/NAPI/usenix-paper.tgz for 
   more information on NAPI.
-
 
 Known Issues/Troubleshooting
 ============================

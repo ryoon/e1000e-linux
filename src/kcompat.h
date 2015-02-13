@@ -291,6 +291,11 @@ struct msix_entry {
 #define IS_ALIGNED(x,a)         (((x) % ((typeof(x))(a))) == 0)
 #endif
 
+#ifdef IS_ENABLED
+#undef IS_ENABLED
+#endif
+#define IS_ENABLED(option) (defined(option) || defined(option##_MODULE))
+
 #ifndef NETIF_F_HW_VLAN_TX
 struct _kc_vlan_ethhdr {
 	unsigned char h_dest[ETH_ALEN];
@@ -1068,6 +1073,11 @@ static inline void _kc_netif_tx_disable(struct net_device *dev)
 #endif /* 2.6.4 => 2.6.0 */
 
 /*****************************************************************************/
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,4,27) )
+#define __user
+#endif /* < 2.4.27 */
+
+/*****************************************************************************/
 /* 2.5.71 => 2.4.x */
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,5,71) )
 #define sk_protocol protocol
@@ -1256,14 +1266,6 @@ static inline struct device *pci_dev_to_dev(struct pci_dev *pdev)
 /* 2.5.28 => 2.4.23 */
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,5,28) )
 
-static inline void _kc_synchronize_irq(void)
-{
-	synchronize_irq();
-}
-
-#undef synchronize_irq
-#define synchronize_irq(X) _kc_synchronize_irq()
-
 #include <linux/tqueue.h>
 #define work_struct tq_struct
 #undef INIT_WORK
@@ -1341,6 +1343,36 @@ static inline const char *_kc_netdev_name(const struct net_device *dev)
 #define strlcpy _kc_strlcpy
 extern size_t _kc_strlcpy(char *dest, const char *src, size_t size);
 #endif /* strlcpy */
+
+#ifndef do_div
+#if BITS_PER_LONG == 64
+# define do_div(n,base) ({					\
+	uint32_t __base = (base);				\
+	uint32_t __rem;						\
+	__rem = ((uint64_t)(n)) % __base;			\
+	(n) = ((uint64_t)(n)) / __base;				\
+	__rem;							\
+ })
+#elif BITS_PER_LONG == 32
+extern uint32_t _kc__div64_32(uint64_t * dividend, uint32_t divisor);
+# define do_div(n,base) ({				\
+	uint32_t __base = (base);			\
+	uint32_t __rem;					\
+	if (likely(((n) >> 32) == 0)) {			\
+		__rem = (uint32_t)(n) % __base;		\
+		(n) = (uint32_t)(n) / __base;		\
+	} else 						\
+		__rem = _kc__div64_32(&(n), __base);	\
+	__rem;						\
+ })
+#else /* BITS_PER_LONG == ?? */
+# error do_div() does not yet support the C64
+#endif /* BITS_PER_LONG */
+#endif /* do_div */
+
+#ifndef NSEC_PER_SEC
+#define NSEC_PER_SEC	1000000000L
+#endif
 
 #endif /* 2.6.0 => 2.5.28 */
 
@@ -1679,6 +1711,8 @@ extern void *_kc_kzalloc(size_t size, int flags);
 #define ESTATUS_1000_TFULL	0x2000	/* Can do 1000BT Full */
 #define ESTATUS_1000_THALF	0x1000	/* Can do 1000BT Half */
 
+#define SUPPORTED_Pause	        (1 << 13)
+#define SUPPORTED_Asym_Pause	(1 << 14)
 #define ADVERTISED_Pause	(1 << 13)
 #define ADVERTISED_Asym_Pause	(1 << 14)
 
@@ -1956,6 +1990,10 @@ do { \
 	PCI_ANY_ID, PCI_ANY_ID, 0, 0
 #endif
 
+#ifndef PCI_VENDOR_ID_INTEL
+#define PCI_VENDOR_ID_INTEL 0x8086
+#endif
+
 #ifndef round_jiffies
 #define round_jiffies(x) x
 #endif
@@ -2025,6 +2063,10 @@ static inline __wsum csum_unfold(__sum16 n)
 	do { \
 		skb->tail = skb->data; \
 	} while (0)
+#define skb_set_tail_pointer(skb, offset) \
+	do { \
+		skb->tail = skb->data + offset; \
+	} while (0)
 #define skb_copy_to_linear_data(skb, from, len) \
 				memcpy(skb->data, from, len)
 #define skb_copy_to_linear_data_offset(skb, offset, from, len) \
@@ -2072,6 +2114,12 @@ extern void _kc_print_hex_dump(const char *level, const char *prefix_str,
 			       const void *buf, size_t len, bool ascii);
 #define print_hex_dump(lvl, s, t, r, g, b, l, a) \
 		_kc_print_hex_dump(lvl, s, t, r, g, b, l, a)
+#ifndef ADVERTISED_2500baseX_Full
+#define ADVERTISED_2500baseX_Full (1 << 15)
+#endif
+#ifndef SUPPORTED_2500baseX_Full
+#define SUPPORTED_2500baseX_Full (1 << 15)
+#endif
 #else /* 2.6.22 */
 #define ETH_TYPE_TRANS_SETS_DEV
 #define HAVE_NETDEV_STATS_IN_NETDEV
@@ -2425,6 +2473,17 @@ static inline void __kc_skb_queue_head_init(struct sk_buff_head *list)
 #define pr_cont(fmt, ...) \
 	printk(KERN_CONT fmt, ##__VA_ARGS__)
 #endif /* pr_cont */
+static inline void _kc_synchronize_irq(unsigned int a)
+{
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,5,28) )
+	synchronize_irq();
+#else /* < 2.5.28 */
+	synchronize_irq(a);
+#endif /* < 2.5.28 */
+}
+
+#undef synchronize_irq
+#define synchronize_irq(a) _kc_synchronize_irq(a)
 #else
 #define HAVE_ASPM_QUIRKS
 #endif /* < 2.6.30 */
@@ -2443,6 +2502,12 @@ static inline void __kc_skb_queue_head_init(struct sk_buff_head *list)
 #ifndef PORT_OTHER
 #define PORT_OTHER 0xff
 #endif
+#ifndef MDIO_PHY_ID_PRTAD
+#define MDIO_PHY_ID_PRTAD 0x03e0
+#endif
+#ifndef MDIO_PHY_ID_DEVAD
+#define MDIO_PHY_ID_DEVAD 0x001f
+#endif
 #else /* < 2.6.31 */
 #ifndef HAVE_NETDEV_STORAGE_ADDRESS
 #define HAVE_NETDEV_STORAGE_ADDRESS
@@ -2452,6 +2517,9 @@ static inline void __kc_skb_queue_head_init(struct sk_buff_head *list)
 #endif
 #ifndef HAVE_TRANS_START_IN_QUEUE
 #define HAVE_TRANS_START_IN_QUEUE
+#endif
+#ifndef HAVE_INCLUDE_LINUX_MDIO_H
+#define HAVE_INCLUDE_LINUX_MDIO_H
 #endif
 #endif /* < 2.6.31 */
 
@@ -2544,6 +2612,24 @@ static inline void __kc_skb_queue_head_init(struct sk_buff_head *list)
 #define PORT_NONE PORT_OTHER
 #endif
 
+#if ((RHEL_RELEASE_CODE && \
+     (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(6,3)) && \
+     (RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(7,0))))
+#if !defined(CONFIG_X86_32) && !defined(CONFIG_NEED_DMA_MAP_STATE)
+#undef DEFINE_DMA_UNMAP_ADDR
+#define DEFINE_DMA_UNMAP_ADDR(ADDR_NAME)	dma_addr_t ADDR_NAME
+#undef DEFINE_DMA_UNMAP_LEN
+#define DEFINE_DMA_UNMAP_LEN(LEN_NAME)		__u32 LEN_NAME
+#undef dma_unmap_addr
+#define dma_unmap_addr(PTR, ADDR_NAME)		((PTR)->ADDR_NAME)
+#undef dma_unmap_addr_set
+#define dma_unmap_addr_set(PTR, ADDR_NAME, VAL)	(((PTR)->ADDR_NAME) = (VAL))
+#undef dma_unmap_len
+#define dma_unmap_len(PTR, LEN_NAME)		((PTR)->LEN_NAME)
+#undef dma_unmap_len_set
+#define dma_unmap_len_set(PTR, LEN_NAME, VAL)	(((PTR)->LEN_NAME) = (VAL))
+#endif /* CONFIG_X86_64 && !CONFIG_NEED_DMA_MAP_STATE */
+#endif /* RHEL_RELEASE_CODE */
 #else /* < 2.6.33 */
 #if defined(CONFIG_FCOE) || defined(CONFIG_FCOE_MODULE)
 #ifndef HAVE_NETDEV_OPS_FCOE_GETWWN
@@ -2726,6 +2812,11 @@ do {								\
 
 /*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,35) )
+
+ssize_t _kc_simple_write_to_buffer(void *to, size_t available, loff_t * ppos,
+				   const void __user * from, size_t count);
+#define simple_write_to_buffer _kc_simple_write_to_buffer
+
 #ifndef numa_node_id
 #define numa_node_id() 0
 #endif
@@ -2809,6 +2900,7 @@ do {								\
 #define usleep_range(min, max)	msleep(DIV_ROUND_UP(min, 1000))
 
 #else /* < 2.6.36 */
+
 #define HAVE_PM_QOS_REQUEST_ACTIVE
 #define HAVE_8021P_SUPPORT
 #define HAVE_NDO_GET_STATS64
@@ -3011,16 +3103,6 @@ struct _kc_ethtool_rx_flow_spec {
 /*****************************************************************************/
 
 /*****************************************************************************/
-#undef CONFIG_E1000E_PTP
-#ifdef E1000E_PTP
-#if ( LINUX_VERSION_CODE >= KERNEL_VERSION(3,0,0) ) && (defined(CONFIG_PTP_1588_CLOCK) || defined(CONFIG_PTP_1588_CLOCK_MODULE))
-#define CONFIG_E1000E_PTP
-#else
-#error Cannot enable PTP Hardware Clock due to insufficient kernel support
-#endif
-#endif /* E1000E_PTP */
-
-/*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(3,1,0) )
 #ifndef __netdev_alloc_skb_ip_align
 #define __netdev_alloc_skb_ip_align(d,l,_g) netdev_alloc_skb_ip_align(d,l)
@@ -3110,7 +3192,6 @@ static inline void __kc_skb_frag_unref(skb_frag_t * frag)
 #undef ixgbe_get_netdev_tc_txq
 #define ixgbe_get_netdev_tc_txq(dev, tc) (&netdev_extended(dev)->qos_data.tc_to_txq[tc])
 #endif
-
 /*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(3,3,0) )
 typedef u32 netdev_features_t;
@@ -3132,6 +3213,9 @@ typedef u32 netdev_features_t;
 
 #define NUMTCS_RETURNS_U8
 
+int _kc_simple_open(struct inode *inode, struct file *file);
+#define simple_open _kc_simple_open
+
 #include <linux/highmem.h>
 static inline void *_kc_kmap_atomic(struct page *page)
 {
@@ -3149,14 +3233,104 @@ static inline void _kc_kunmap_atomic(void *addr)
 #undef kunmap_atomic
 #define kunmap_atomic(addr) _kc_kunmap_atomic((addr))
 
-#endif /* < 3.4.0 */
+#else /* < 3.4.0 */
+#include <linux/kconfig.h>
+#endif /* >= 3.4.0 */
+
+/*****************************************************************************/
+#if defined(E1000E_PTP) || defined(IXGBE_PTP)
+#if ( LINUX_VERSION_CODE >= KERNEL_VERSION(3,0,0) ) && IS_ENABLED(CONFIG_PTP_1588_CLOCK)
+#define HAVE_PTP_1588_CLOCK
+#else
+#error Cannot enable PTP Hardware Clock support due to a pre-3.0 kernel version or CONFIG_PTP_1588_CLOCK not enabled in the kernel
+#endif /* > 3.0.0 && IS_ENABLED(CONFIG_PTP_1588_CLOCK) */
+#endif /* E1000E_PTP || IXGBE_PTP */
 
 /*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(3,5,0) )
 #define skb_tx_timestamp(skb) do {} while (0)
-#define eth_random_addr(addr) random_ether_addr(addr)
 #else
 #define HAVE_FDB_OPS
 #define HAVE_ETHTOOL_GET_TS_INFO
 #endif /* < 3.5.0 */
+
+/******************************************************************************/
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(3,7,0) )
+#ifdef ETHTOOL_GEEE
+#include <linux/mdio.h>
+/**
+ * mmd_eee_cap_to_ethtool_sup_t
+ * @eee_cap: value of the MMD EEE Capability register
+ *
+ * A small helper function that translates MMD EEE Capability (3.20) bits
+ * to ethtool supported settings.
+ */
+static inline u32 mmd_eee_cap_to_ethtool_sup_t(u16 eee_cap)
+{
+	u32 supported = 0;
+
+	if (eee_cap & MDIO_EEE_100TX)
+		supported |= SUPPORTED_100baseT_Full;
+	if (eee_cap & MDIO_EEE_1000T)
+		supported |= SUPPORTED_1000baseT_Full;
+	if (eee_cap & MDIO_EEE_10GT)
+		supported |= SUPPORTED_10000baseT_Full;
+	if (eee_cap & MDIO_EEE_1000KX)
+		supported |= SUPPORTED_1000baseKX_Full;
+	if (eee_cap & MDIO_EEE_10GKX4)
+		supported |= SUPPORTED_10000baseKX4_Full;
+	if (eee_cap & MDIO_EEE_10GKR)
+		supported |= SUPPORTED_10000baseKR_Full;
+
+	return supported;
+}
+
+/**
+ * mmd_eee_adv_to_ethtool_adv_t
+ * @eee_adv: value of the MMD EEE Advertisement/Link Partner Ability registers
+ *
+ * A small helper function that translates the MMD EEE Advertisment (7.60)
+ * and MMD EEE Link Partner Ability (7.61) bits to ethtool advertisement
+ * settings.
+ */
+static inline u32 mmd_eee_adv_to_ethtool_adv_t(u16 eee_adv)
+{
+	u32 adv = 0;
+
+	if (eee_adv & MDIO_EEE_100TX)
+		adv |= ADVERTISED_100baseT_Full;
+	if (eee_adv & MDIO_EEE_1000T)
+		adv |= ADVERTISED_1000baseT_Full;
+	if (eee_adv & MDIO_EEE_10GT)
+		adv |= ADVERTISED_10000baseT_Full;
+	if (eee_adv & MDIO_EEE_1000KX)
+		adv |= ADVERTISED_1000baseKX_Full;
+	if (eee_adv & MDIO_EEE_10GKX4)
+		adv |= ADVERTISED_10000baseKX4_Full;
+	if (eee_adv & MDIO_EEE_10GKR)
+		adv |= ADVERTISED_10000baseKR_Full;
+
+	return adv;
+}
+#endif /* ETHTOOL_GEEE */
+
+#ifndef pci_pcie_type
+#define pci_pcie_type(x)	(x)->pcie_type
+#endif
+
+#define ptp_clock_register(caps, args...) ptp_clock_register(caps)
+
+#else /* >= 3.7.0 */
+#define HAVE_CONST_STRUCT_PCI_ERROR_HANDLERS
+#endif /* >= 3.7.0 */
+
+/*****************************************************************************/
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(3,8,0) )
+#ifndef PCI_EXP_LNKCTL_ASPM_L0S
+#define  PCI_EXP_LNKCTL_ASPM_L0S  0x01	/* L0s Enable */
+#endif
+#ifndef PCI_EXP_LNKCTL_ASPM_L1
+#define  PCI_EXP_LNKCTL_ASPM_L1   0x02	/* L1 Enable */
+#endif
+#endif /* < 3.8.0 */
 #endif /* _KCOMPAT_H_ */

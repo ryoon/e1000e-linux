@@ -40,6 +40,11 @@ ifeq (,$(BUILD_KERNEL))
 BUILD_KERNEL=$(shell uname -r)
 endif
 
+# Use E1000E_PTP compile flag to enable IEEE-1588 PTP (documented in README)
+ifeq ($(filter %E1000E_PTP,$(CFLAGS_EXTRA)),-DE1000E_PTP)
+  CFILES += ptp.c
+endif
+
 DRIVER_NAME = e1000e
 
 ###########################################################################
@@ -83,6 +88,7 @@ endif
 VSP :=  $(KOBJ)/include/generated/utsrelease.h \
         $(KOBJ)/include/linux/utsrelease.h \
         $(KOBJ)/include/linux/version.h \
+        $(KOBJ)/include/generated/uapi/linux/version.h \
         /boot/vmlinuz.version.h
 
 # Config file Search Path
@@ -183,7 +189,7 @@ ifneq (1,$(shell [ $(KVER_CODE) -ge 132096 ] && echo 1 || echo 0))
 endif
 
 # set the install path
-ifneq (1,$(shell [ $(KVER_CODE) -lt 197120 ] && echo 1 || echo 0))
+ifeq (1,$(shell [ $(KVER_CODE) -lt 197120 ] && echo 1 || echo 0))
 INSTDIR := /lib/modules/$(KVER)/kernel/drivers/net/$(DRIVER_NAME)
 else
 INSTDIR := /lib/modules/$(KVER)/kernel/drivers/net/ethernet/intel/$(DRIVER_NAME)
