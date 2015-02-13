@@ -11,10 +11,6 @@
  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
  * more details.
  *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
- *
  * The full GNU General Public License is included in this distribution in
  * the file called "COPYING".
  *
@@ -2884,6 +2880,7 @@ static inline bool pci_is_pcie(struct pci_dev *dev)
      (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(6,4)) && \
      (RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(7,0)))
 #define HAVE_RHEL6_ETHTOOL_OPS_EXT_STRUCT
+#define HAVE_ETHTOOL_GRXFHINDIR_SIZE
 #define HAVE_ETHTOOL_SET_PHYS_ID
 #define HAVE_ETHTOOL_GET_TS_INFO
 #endif /* RHEL >= 6.4 && RHEL < 7.0 */
@@ -3550,7 +3547,11 @@ typedef u32 netdev_features_t;
 #define netdev_tx_reset_queue(_q) do {} while (0)
 #define netdev_reset_queue(_n) do {} while (0)
 #endif
+#if (SLE_VERSION_CODE && SLE_VERSION_CODE >= SLE_VERSION(11,3,0))
+#define HAVE_ETHTOOL_GRXFHINDIR_SIZE
+#endif /* SLE_VERSION(11,3,0) */
 #else /* ! < 3.3.0 */
+#define HAVE_ETHTOOL_GRXFHINDIR_SIZE
 #define HAVE_INT_NDO_VLAN_RX_ADD_VID
 #ifdef ETHTOOL_SRXNTUPLE
 #undef ETHTOOL_SRXNTUPLE
@@ -3841,6 +3842,14 @@ int __kc_pcie_capability_clear_word(struct pci_dev *dev, int pos, u16 clear);
 
 /*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(3,8,0) )
+#ifndef pci_sriov_set_totalvfs
+static inline int __kc_pci_sriov_set_totalvfs(struct pci_dev *dev, u16 numvfs)
+{
+	return 0;
+}
+
+#define pci_sriov_set_totalvfs(a, b) __kc_pci_sriov_set_totalvfs((a), (b))
+#endif
 #ifndef PCI_EXP_LNKCTL_ASPM_L0S
 #define  PCI_EXP_LNKCTL_ASPM_L0S  0x01	/* L0s Enable */
 #endif
@@ -3965,11 +3974,6 @@ static inline struct sk_buff *__kc__vlan_hwaccel_put_tag(struct sk_buff *skb,
 #define HAVE_NDO_GET_PHYS_PORT_ID
 #endif /* >= 3.12.0 */
 
-#if (SLE_VERSION_CODE && SLE_VERSION_CODE == SLE_VERSION(11,2,0))
-#undef ETHTOOL_GRXFHINDIR
-#undef ETHTOOL_SRXFHINDIR
-#endif /* SLES (11,2,0) */
-
 /*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(3,13,0) )
 #define dma_set_mask_and_coherent(_p, _m) __kc_dma_set_mask_and_coherent(_p, _m)
@@ -3982,8 +3986,7 @@ extern int __kc_dma_set_mask_and_coherent(struct device *dev, u64 mask);
 /*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(3,14,0) )
 
-#if ( RHEL_RELEASE_CODE && RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,0) )
-#else
+#if ( !(RHEL_RELEASE_CODE && RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,0)) )
 /* it isn't expected that this would be a #define unless we made it so */
 #ifndef skb_set_hash
 enum pkt_hash_types {
@@ -4002,15 +4005,22 @@ static inline void __kc_skb_set_hash(struct sk_buff *skb, u32 hash, int type)
 	skb->rxhash = hash;
 #endif
 }
-#endif
+#endif /* !skb_set_hash */
+#endif /* !(RHEL_RELEASE_CODE&&RHEL_RELEASE_CODE>=RHEL_RELEASE_VERSION(7,0)) */
+
+#ifndef pci_enable_msix_range
+extern int __kc_pci_enable_msix_range(struct pci_dev *dev,
+				      struct msix_entry *entries,
+				      int minvec, int maxvec);
+#define pci_enable_msix_range __kc_pci_enable_msix_range
 #endif
 
-#else
+#else /* >= 3.14.0 */
 
 /* for ndo_dfwd_ ops add_station, del_station and _start_xmit */
 #ifndef HAVE_NDO_DFWD_OPS
 #define HAVE_NDO_DFWD_OPS
 #endif
-#endif
+#endif /* 3.14.0 */
 
 #endif /* _KCOMPAT_H_ */
