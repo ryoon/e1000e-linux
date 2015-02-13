@@ -5,7 +5,7 @@ e1000e Linux* Base Driver for Intel® Network Connection
 
 ================================================================================
 
-July 9, 2013
+January 13, 2014
 
 ================================================================================
 
@@ -25,7 +25,7 @@ Overview
 
 
 The e1000e Linux base driver supports the 2.4.x, 2.6.x, and 3.x kernels, and
-inclues support for Itanium® 2-based systems. It is only supported as a
+includes support for Itanium® 2-based systems. It is only supported as a
 loadable module. Intel is not supplying patches against the kernel source to
 allow for static linking of the drivers. For questions related to hardware
 requirements, refer to the documentation supplied with your Intel Gigabit
@@ -108,8 +108,8 @@ NOTES:
 5. Load the module using the modprobe command:
    modprobe e1000e
 
-   With 2.6 based kernels also make sure that older e1000e drivers are removed
-   from the kernel, before loading the new module:
+   With 2.6 based and newer kernels also make sure that older e1000e drivers 
+   are removed from the kernel, before loading the new module:
    rmmod e1000e; modprobe e1000e
 6. Assign an IP address to the interface by entering the following, where x
    is the interface number:
@@ -824,10 +824,10 @@ Unplugging Network Cable While ethtool -p is Running
 ----------------------------------------------------
 
 
-In kernel versions 2.5.50 and later (including 2.6 kernel), unplugging the
-network cable while ethtool -p is running will cause the system to become
-unresponsive to keyboard commands, except for control-alt-delete. Restarting
-the system appears to be the only remedy.
+In kernel versions 2.5.50 and newer, unplugging the network cable while 
+ethtool -p is running will cause the system to become unresponsive to 
+keyboard commands, except for control-alt-delete. Restarting the system 
+appears to be the only remedy.
 
 
 
@@ -849,7 +849,7 @@ Rx Page Allocation Errors
 
 
 'Page allocation failure. order:0' errors may occur under stress with kernels
-2.6.25 and above. This is caused by the way the Linux kernel reports this
+2.6.25 and newer. This is caused by the way the Linux kernel reports this
 stressed condition.
 
 
